@@ -65,7 +65,6 @@ private:
   double *vxpn, *vypn, *vzpn;
 public:
   void integrate(double dt);     // integrate planetary orbit
-  void disktoplanet(double dt);  // to be added to allow planet migration
   void fixorbit(double dt);      // circular planetary orbit
   void Rotframe(double dt);      // for frame rotating at omegarot
 };
@@ -231,24 +230,6 @@ static void UserOutflowOuterX1(MeshBlock *pmb, Coordinates *pco, AthenaArray<Rea
                   FaceField &bb, Real time, Real dt, int is, int ie, int js, int je, int ks, int ke);
 static void InflowOuterX1(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim,
                   FaceField &bb, Real time, Real dt, int is, int ie, int js, int je, int ks, int ke);
-static void FieldSteadyInnerX1(MeshBlock *pmb, Coordinates *pcoord, AthenaArray<Real> &prim,
-                  FaceField &bb, Real time, Real dt, int is, int ie, int js, int je, int ks, int ke);
-static void FieldSteadyOuterX1(MeshBlock *pmb, Coordinates *pcoord, AthenaArray<Real> &prim,
-                  FaceField &bb, Real time, Real dt, int is, int ie, int js, int je, int ks, int ke);
-static void FieldOutflowInnerX1(MeshBlock *pmb, Coordinates *pcoord, AthenaArray<Real> &prim,
-                  FaceField &bb, Real time, Real dt, int is, int ie, int js, int je, int ks, int ke);
-static void FieldOutflowOuterX1(MeshBlock *pmb, Coordinates *pcoord, AthenaArray<Real> &prim,
-                  FaceField &bb, Real time, Real dt, int is, int ie, int js, int je, int ks, int ke);
-static void FieldDivFreeInnerX1(MeshBlock *pmb, Coordinates *pcoord, AthenaArray<Real> &prim,
-                  FaceField &bb, Real time, Real dt, int is, int ie, int js, int je, int ks, int ke);
-static void FieldDivFreeOuterX1(MeshBlock *pmb, Coordinates *pcoord, AthenaArray<Real> &prim,
-                  FaceField &bb, Real time, Real dt, int is, int ie, int js, int je, int ks, int ke);
-static void FieldInflowOuterX1(MeshBlock *pmb, Coordinates *pcoord, AthenaArray<Real> &prim,
-                  FaceField &bb, Real time, Real dt, int is, int ie, int js, int je, int ks, int ke);
-static void FieldInflowAdvectOuterX1(MeshBlock *pmb, Coordinates *pcoord, AthenaArray<Real> &prim,
-                  FaceField &bb, Real time, Real dt, int is, int ie, int js, int je, int ks, int ke);
-static void FieldInflowVerticalOuterX1(MeshBlock *pmb, Coordinates *pcoord, AthenaArray<Real> &prim,
-                  FaceField &bb, Real time, Real dt, int is, int ie, int js, int je, int ks, int ke);
 static void SteadyInnerX2(MeshBlock *pmb, Coordinates *pcoord, AthenaArray<Real> &prim,
                   FaceField &bb, Real time, Real dt, int is, int ie, int js, int je, int ks, int ke);
 static void SteadyOuterX2(MeshBlock *pmb, Coordinates *pcoord, AthenaArray<Real> &prim,
@@ -368,19 +349,7 @@ void Mesh::InitUserMeshData(ParameterInput *pin)
   xc = pin->GetOrAddReal("problem","xc",1.0);
   yc = pin->GetOrAddReal("problem","yc",0.0);
   zc = pin->GetOrAddReal("problem","zc",0.0);
-
-  // Initialize the magnetic fields
-  if (MAGNETIC_FIELDS_ENABLED){
-    // Get parameters of inital magnetic fields
-    rcut =  pin->GetOrAddReal("problem","rcut",0.0);
-    rs =  pin->GetOrAddReal("problem","rs",0.0);
-    ifield = pin->GetInteger("problem","ifield");
-    beta = pin->GetReal("problem","beta");
-    mm = pin->GetOrAddReal("problem","mm",0.0);
-    b0=sqrt(2.*p0_over_r0*rho0/beta);
-
-    nx2coarse = pin->GetInteger("mesh","nx2");
-  }
+  
 
   int nuser_out_var=pin->GetOrAddInteger("mesh","nuser_out_var",0);
 
@@ -397,23 +366,15 @@ void Mesh::InitUserMeshData(ParameterInput *pin)
 
   if(ix1_bc == "user") {
     hbc_ix1 = pin->GetReal("problem","hbc_ix1");
-    if(MAGNETIC_FIELDS_ENABLED)
-      mbc_ix1 = pin->GetReal("problem","mbc_ix1");
   }
   if(ox1_bc == "user"){
     hbc_ox1 = pin->GetReal("problem","hbc_ox1");
-    if(MAGNETIC_FIELDS_ENABLED)
-      mbc_ox1 = pin->GetReal("problem","mbc_ox1");
   }
   if(ix2_bc == "user") {
     hbc_ix2 = pin->GetReal("problem","hbc_ix2");
-    if(MAGNETIC_FIELDS_ENABLED)
-      mbc_ix2 = pin->GetReal("problem","mbc_ix2");
   }
   if(ox2_bc == "user"){
     hbc_ox2 = pin->GetReal("problem","hbc_ox2");
-    if(MAGNETIC_FIELDS_ENABLED)
-      mbc_ox2 = pin->GetReal("problem","mbc_ox2");
   }
 
   // Get circumplanetary disk density depletion
@@ -518,17 +479,7 @@ void Mesh::InitUserMeshData(ParameterInput *pin)
   }
   //EnrollDiffusivityFunction(my_df); 
   // Enroll User Source terms
-  if(MAGNETIC_FIELDS_ENABLED){
-
-    Real eta_ohm = pin->GetOrAddReal("problem","eta_ohm",0.0);
-    Real eta_hall = pin->GetOrAddReal("problem","eta_hall",0.0);
-    Real eta_ad = pin->GetOrAddReal("problem","eta_ad",0.0);
-
-    if ((eta_ohm != 0.0) || (eta_hall != 0.0) || (eta_ad != 0.0)) {
-      EnrollFieldDiffusivity(my_df);
-    }
-  }
-
+  
   EnrollUserExplicitSourceFunction(PlanetarySourceTerms);
   // Enroll Viscosity
   if (alpha > 0.0) {
@@ -639,118 +590,7 @@ void MeshBlock::ProblemGenerator(ParameterInput *pin)
 {
 
   std::srand(gid);
-  
 
-  // Set initial magnetic fields
-  if (MAGNETIC_FIELDS_ENABLED){
-    if(ifield==1||ifield==2||ifield==3||ifield==4||ifield==6||ifield==7||ifield==8){
-      // Compute vector potential
-      AthenaArray<Real> a1,a2,a3;
-      int nx1 = (ie-is)+1 + 2*(NGHOST);
-      int nx2 = (je-js)+1 + 2*(NGHOST);
-      int nx3 = (ke-ks)+1 + 2*(NGHOST);
-      a1.NewAthenaArray(nx3,nx2,nx1);
-      a2.NewAthenaArray(nx3,nx2,nx1);
-      a3.NewAthenaArray(nx3,nx2,nx1);
-
-      for (int k=ks; k<=ke+1; k++) {
-        for (int j=js; j<=je+1; j++) {
-          for (int i=is; i<=ie+1; i++) {
-            a1(k,j,i) = A1(pcoord->x1v(i), pcoord->x2f(j), pcoord->x3f(k));
-            a2(k,j,i) = A2(pcoord->x1f(i), pcoord->x2v(j), pcoord->x3f(k));
-            a3(k,j,i) = A3(pcoord->x1f(i), pcoord->x2f(j), pcoord->x3v(k));
-          }
-        }
-      }
-
-      // Initialize interface fields
-      AthenaArray<Real> area,len,len_p1;
-      area.NewAthenaArray(nx1);
-      len.NewAthenaArray(nx1);
-      len_p1.NewAthenaArray(nx1);
-
-      // for 1,2,3-D
-      for (int k=ks; k<=ke; ++k) {
-        // reset loop limits for polar boundary
-        int jl=js; int ju=je+1;
-        if (pbval->block_bcs[INNER_X2] == BoundaryFlag::polar || pbval->block_bcs[INNER_X2] == BoundaryFlag::polar_wedge) jl=js+1; 
-        if (pbval->block_bcs[OUTER_X2] == BoundaryFlag::polar || pbval->block_bcs[OUTER_X2] == BoundaryFlag::polar_wedge) ju=je;
-        for (int j=jl; j<=ju; ++j) {
-          pcoord->Face2Area(k,j,is,ie,area);
-          pcoord->Edge3Length(k,j,is,ie+1,len);
-          for (int i=is; i<=ie; ++i) {
-            pfield->b.x2f(k,j,i) = -1.0*(len(i+1)*a3(k,j,i+1) - len(i)*a3(k,j,i))/area(i);
-          }
-        }
-      }
-      for (int k=ks; k<=ke+1; ++k) {
-        for (int j=js; j<=je; ++j) {
-          pcoord->Face3Area(k,j,is,ie,area);
-          pcoord->Edge2Length(k,j,is,ie+1,len);
-          for (int i=is; i<=ie; ++i) {
-            pfield->b.x3f(k,j,i) = (len(i+1)*a2(k,j,i+1) - len(i)*a2(k,j,i))/area(i);
-          }
-        }
-      }
-      // for 2D and 3D
-      if (block_size.nx2 > 1) {
-        for (int k=ks; k<=ke; ++k) {
-          for (int j=js; j<=je; ++j) {
-            pcoord->Face1Area(k,j,is,ie+1,area);
-            pcoord->Edge3Length(k,j  ,is,ie+1,len);
-            pcoord->Edge3Length(k,j+1,is,ie+1,len_p1);
-            for (int i=is; i<=ie+1; ++i) {
-              pfield->b.x1f(k,j,i) = (len_p1(i)*a3(k,j+1,i) - len(i)*a3(k,j,i))/area(i);
-            }
-          }
-        }
-        for (int k=ks; k<=ke+1; ++k) {
-          for (int j=js; j<=je; ++j) {
-            pcoord->Face3Area(k,j,is,ie,area);
-            pcoord->Edge1Length(k,j  ,is,ie,len);
-            pcoord->Edge1Length(k,j+1,is,ie,len_p1);
-            for (int i=is; i<=ie; ++i) {
-              pfield->b.x3f(k,j,i) -= (len_p1(i)*a1(k,j+1,i) - len(i)*a1(k,j,i))/area(i);
-            }
-          }
-        }
-      }
-      // for 3D only
-      if (block_size.nx3 > 1) {
-        for (int k=ks; k<=ke; ++k) {
-          for (int j=js; j<=je; ++j) {
-            pcoord->Face1Area(k,j,is,ie+1,area);
-            pcoord->Edge2Length(k  ,j,is,ie+1,len);
-            pcoord->Edge2Length(k+1,j,is,ie+1,len_p1);
-            for (int i=is; i<=ie+1; ++i) {
-              pfield->b.x1f(k,j,i) -= (len_p1(i)*a2(k+1,j,i) - len(i)*a2(k,j,i))/area(i);
-            }
-          }
-        }
-        for (int k=ks; k<=ke; ++k) {
-          // reset loop limits for polar boundary
-          int jl=js; int ju=je+1;
-          if (pbval->block_bcs[INNER_X2] == BoundaryFlag::polar || pbval->block_bcs[INNER_X2] == BoundaryFlag::polar_wedge) jl=js+1; 
-          if (pbval->block_bcs[OUTER_X2] == BoundaryFlag::polar || pbval->block_bcs[OUTER_X2] == BoundaryFlag::polar_wedge) ju=je;
-          for (int j=jl; j<=ju; ++j) {
-            pcoord->Face2Area(k,j,is,ie,area);
-            pcoord->Edge1Length(k  ,j,is,ie,len);
-            pcoord->Edge1Length(k+1,j,is,ie,len_p1);
-            for (int i=is; i<=ie; ++i) {
-              pfield->b.x2f(k,j,i) += (len_p1(i)*a1(k+1,j,i) - len(i)*a1(k,j,i))/area(i);
-            }
-          }
-        }
-      }
-  
-      a1.DeleteAthenaArray();
-      a2.DeleteAthenaArray();
-      a3.DeleteAthenaArray();
-      area.DeleteAthenaArray();
-      len.DeleteAthenaArray();
-      len_p1.DeleteAthenaArray();
-    }
-  }
   //  Initialize density
   for(int k=ks; k<=ke; ++k) {
     for (int j=js; j<=je; ++j) {
@@ -760,29 +600,6 @@ void MeshBlock::ProblemGenerator(ParameterInput *pin)
     }
   }
 
-  // ifield 5: toroidal fields within 2 MIDPLANE disk scale height 
-  if (MAGNETIC_FIELDS_ENABLED){
-   if(ifield==5){
-    for (int k=ks; k<=ke+1; ++k) {
-      for (int j=js; j<=je; ++j) {
-        for (int i=is; i<=ie; ++i) {
-          Real x1 = pcoord->x1v(i);
-          Real x2 = pcoord->x2v(j);
-          Real r = std::max(fabs(x1*sin(x2)),xcut);
-          Real z = fabs(x1*cos(x2));
-          Real p_over_r = p0_over_r0;
-	  Real p_over_r_mid = p_over_r;
-          if (NON_BAROTROPIC_EOS) {
-	    p_over_r_mid = PoverR(x1*sin(x2), PI/2., pcoord->x3v(k)); 
-	    p_over_r = PoverR(x1, x2, pcoord->x3v(k)); 
-	  }
-          if (fabs(z)<2.*sqrt(p_over_r_mid*r*r*r/gms)) 
-	    pfield->b.x3f(k,j,i) = sqrt(2.*p_over_r*phydro->u(IDN,ks,j,i)/beta);
-        }
-      }
-    }
-   }
-  }
 
   // add density perturbation, needs to be after ifield 5 which assumes the disk is axisymmetric in the x3 direction so that divB=0.
   for(int k=ks; k<=ke; ++k) {
@@ -812,8 +629,6 @@ void MeshBlock::ProblemGenerator(ParameterInput *pin)
       }
     }
   }
-  //Calculate Bcc
-  if (MAGNETIC_FIELDS_ENABLED) pfield->CalculateCellCenteredField(pfield->b, pfield->bcc, pcoord, is, ie, js, je, ks, ke);    
   //  Initialize pressure
   if (NON_BAROTROPIC_EOS){
     for(int k=ks; k<=ke; ++k) {
@@ -826,12 +641,6 @@ void MeshBlock::ProblemGenerator(ParameterInput *pin)
           phydro->u(IEN,k,j,i) = p_over_r*phydro->u(IDN,k,j,i)/(gamma_gas - 1.0);
           phydro->u(IEN,k,j,i) += 0.5*(SQR(phydro->u(IM1,k,j,i))+SQR(phydro->u(IM2,k,j,i))+
 				       SQR(phydro->u(IM3,k,j,i)))/phydro->u(IDN,k,j,i);
-          if (MAGNETIC_FIELDS_ENABLED){
-            phydro->u(IEN,k,j,i) += 0.5*(SQR(pfield->bcc(IB1,k,j,i))+SQR(pfield->bcc(IB2,k,j,i))+SQR(pfield->bcc(IB3,k,j,i)));
-    //          0.5*(SQR(0.5*(pfield->b.x1f(k,j,i+1) + pfield->b.x1f(k,j,i)))
-    //             + SQR(0.5*(pfield->b.x2f(k,j+1,i) + pfield->b.x2f(k,j,i)))
-    //             + SQR(0.5*(pfield->b.x3f(k+1,j,i) + pfield->b.x3f(k,j,i))));
-          }
           // Initialize dust temperature
 	  if (ionization==1){
 	    Real rnocut = fabs(x1*sin(x2));
@@ -1438,16 +1247,6 @@ void DiskInnerX1(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim, Face
     DiodeInnerX1(pmb, pco, prim, b, time, dt, is,ie,js,je,ks,ke);
   else if(hbc_ix1 == 4)
     UserOutflowInnerX1(pmb, pco, prim, b, time, dt, is,ie,js,je,ks,ke);
-
-  // inner x1 field BCs
-  if (MAGNETIC_FIELDS_ENABLED) {
-    if(mbc_ix1 == 1)
-      FieldSteadyInnerX1(pmb, pco, prim, b, time, dt, is,ie,js,je,ks,ke);
-    else if(mbc_ix1 == 2)
-      FieldOutflowInnerX1(pmb, pco, prim, b, time, dt, is,ie,js,je,ks,ke);
-    else if(mbc_ix1 == 3)
-      FieldDivFreeInnerX1(pmb, pco, prim, b, time, dt, is,ie,js,je,ks,ke);
-  }
 }
 
 // Summary of all BCs for outer X1 
@@ -1463,22 +1262,6 @@ void DiskOuterX1(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim, Face
     InflowOuterX1(pmb, pco, prim, b, time, dt, is,ie,js,je,ks,ke);
   else if(hbc_ox1 == 4)
     UserOutflowOuterX1(pmb, pco, prim, b, time, dt, is,ie,js,je,ks,ke);
-
-  // outer x1 field BCs
-  if (MAGNETIC_FIELDS_ENABLED) {
-    if(mbc_ox1 == 1)
-      FieldSteadyOuterX1(pmb, pco, prim, b, time, dt, is,ie,js,je,ks,ke);
-    else if(mbc_ox1 == 2)
-      FieldOutflowOuterX1(pmb, pco, prim, b, time, dt, is,ie,js,je,ks,ke);
-    else if(mbc_ox1 == 3)
-      FieldDivFreeOuterX1(pmb, pco, prim, b, time, dt, is,ie,js,je,ks,ke);
-    else if(mbc_ox1 == 4)
-      FieldInflowOuterX1(pmb, pco, prim, b, time, dt, is,ie,js,je,ks,ke);
-    else if(mbc_ox1 == 5)
-      FieldInflowAdvectOuterX1(pmb, pco, prim, b, time, dt, is,ie,js,je,ks,ke);
-    else if(mbc_ox1 == 6)
-      FieldInflowVerticalOuterX1(pmb, pco, prim, b, time, dt, is,ie,js,je,ks,ke);
-  }
 }
 
 // Summary of all BCs for Inner X2
@@ -1490,11 +1273,6 @@ void DiskInnerX2(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim, Face
     SteadyInnerX2(pmb, pco, prim, b, time, dt, is,ie,js,je,ks,ke);
   else if(hbc_ix2 == 2)
     StratInnerX2(pmb, pco, prim, b, time, dt, is,ie,js,je,ks,ke);
-  // inner X2 field BCs
-  if (MAGNETIC_FIELDS_ENABLED) {
-    if(mbc_ix2 == 1)
-      FieldOutflowInnerX2(pmb, pco, prim, b, time, dt, is,ie,js,je,ks,ke); 
-  }
 }
 
 // Summary of all BCs for Outer X2
@@ -1506,12 +1284,6 @@ void DiskOuterX2(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim, Face
     SteadyOuterX2(pmb, pco, prim, b, time, dt, is,ie,js,je,ks,ke);
   else if(hbc_ox2 == 2)
     StratOuterX2(pmb, pco, prim, b, time, dt, is,ie,js,je,ks,ke);
-
-  // outer X2 field BCs
-  if (MAGNETIC_FIELDS_ENABLED) {
-    if(mbc_ox2 == 1)
-      FieldOutflowOuterX2(pmb, pco, prim, b, time, dt, is,ie,js,je,ks,ke);
-  }
 }
 
 
@@ -1520,7 +1292,8 @@ void DiskOuterX2(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim, Face
 void SteadyInnerX1(MeshBlock *pmb, Coordinates *pcoord, AthenaArray<Real> &prim, FaceField &bb,
  		   Real time, Real dt, int is, int ie, int js, int je, int ks, int ke)
 {
- if(pmb->pmy_mesh->time==firsttime){ //cannot use time since time here is temperaory and can be the halfstep and fullstep time, first time is meshtime which will not change during one whole integration including predict and correct
+ if(pmb->pmy_mesh->time==firsttime){  // cannot use time since time here is temperaory and can be the halfstep and fullstep time, 
+                                      // first time is meshtime which will not change during one whole integration including predict and correct
   for (int k=ks; k<=ke; ++k) { 
     for (int j=js; j<=je; ++j) { 
       for (int i=1; i<=(NGHOST); ++i) {
@@ -1765,495 +1538,6 @@ void StratOuterX2(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim, Fac
       }
     }
 }
-
-
-// Field BC at inner X1: reset ghost zone to initial condition
-void FieldSteadyInnerX1(MeshBlock *pmb, Coordinates *pcoord, AthenaArray<Real> &prim, FaceField &bb,
-                        Real time, Real dt, int is, int ie, int js, int je, int ks, int ke)
-{
-  if (MAGNETIC_FIELDS_ENABLED){
-    Real eps=pcoord->dx2f(0)/100.;
-
-    // Compute vector potential
-    AthenaArray<Real> a1,a2,a3;
-    int nx1 = (pmb->ie-pmb->is)+2 + 2*(NGHOST);
-    int nx2 = (pmb->je-pmb->js)+2 + 2*(NGHOST);
-    int nx3 = (pmb->ke-pmb->ks)+2 + 2*(NGHOST);
-    a1.NewAthenaArray(nx3,nx2,nx1);
-    a2.NewAthenaArray(nx3,nx2,nx1);
-    a3.NewAthenaArray(nx3,nx2,nx1);
-
-    for (int k=ks; k<=ke+1; k++) {
-      for (int j=js; j<=je+1; j++) {
-        for (int i=is-NGHOST; i<=is-1; i++) {
-          a1(k,j,i) = A1(pcoord->x1v(i), pcoord->x2f(j), pcoord->x3f(k));
-        }
-      }
-    }
-
-    for (int k=ks; k<=ke+1; k++) {
-      for (int j=js; j<=je; j++) {
-        for (int i=is-NGHOST; i<=is; i++) {
-          a2(k,j,i) = A2(pcoord->x1f(i), pcoord->x2v(j), pcoord->x3f(k));
-        } 
-      }   
-    } 
-
-    for (int k=ks; k<=ke; k++) {
-      for (int j=js; j<=je+1; j++) {
-        for (int i=is-NGHOST; i<=is; i++) {
-          a3(k,j,i) = A3(pcoord->x1f(i), pcoord->x2f(j), pcoord->x3v(k));
-        } 
-      }   
-    } 
-
-    // Initialize interface fields
-    AthenaArray<Real> area,len,len_p1;
-    area.NewAthenaArray(nx1);
-    len.NewAthenaArray(nx1);
-    len_p1.NewAthenaArray(nx1);
-
-    for (int k=ks; k<=ke; ++k) {
-      // reset loop limits for polar boundary
-      int jl=js; int ju=je+1;
-      for (int j=jl; j<=ju; ++j) {
-        pcoord->Face2Area(k,j,is-NGHOST,is-1,area);
-        pcoord->Edge3Length(k,j,is-NGHOST,is,len);
-        for (int i=is-NGHOST; i<=is-1; ++i) {
-	  // x2f should flip sign across the pole
-          if(pcoord->x2f(j)<0.0-eps||pcoord->x2f(j)>PI+eps) {
-            bb.x2f(k,j,i) = (len(i+1)*a3(k,j,i+1) - len(i)*a3(k,j,i))/area(i);
-          }else{
-            if(pcoord->x2f(j)>0.0+eps&&pcoord->x2f(j)<PI-eps) 
-	      bb.x2f(k,j,i) = -(len(i+1)*a3(k,j,i+1) - len(i)*a3(k,j,i))/area(i);
-          }
-	}
-      }
-    }
-
-    for (int k=ks; k<=ke+1; ++k) {
-    for (int j=js; j<=je; ++j) {
-      pcoord->Face3Area(k,j,is-NGHOST,is-1,area);
-      pcoord->Edge2Length(k,j,is-NGHOST,is,len);
-      for (int i=is-NGHOST; i<=is-1; ++i) {
-	// x3f should flip sign across the pole 
-        if(pcoord->x2v(j)<0.0||pcoord->x2v(j)>PI) { 
-          bb.x3f(k,j,i) = -(len(i+1)*a2(k,j,i+1) - len(i)*a2(k,j,i))/area(i);
-        }else{
-          bb.x3f(k,j,i) = (len(i+1)*a2(k,j,i+1) - len(i)*a2(k,j,i))/area(i);
-        }
-      }
-    }}
-
-    if (pmb->block_size.nx2 > 1) {
-      for (int k=ks; k<=ke; ++k) {
-      for (int j=js; j<=je; ++j) {
-        pcoord->Face1Area(k,j,is-NGHOST,is-1,area);
-        pcoord->Edge3Length(k,j  ,is-NGHOST,is-1,len);
-        pcoord->Edge3Length(k,j+1,is-NGHOST,is-1,len_p1);
-        for (int i=is-NGHOST; i<=is-1; ++i) {
-	  // across the pole, we should use j index quantities to minus j+1 index quantities
-          if(pcoord->x2v(j)<0.0||pcoord->x2v(j)>PI) {  
-            bb.x1f(k,j,i) = -(len_p1(i)*a3(k,j+1,i) - len(i)*a3(k,j,i))/area(i);
-          }else{
-            bb.x1f(k,j,i) = (len_p1(i)*a3(k,j+1,i) - len(i)*a3(k,j,i))/area(i);
-          }
-        }
-      }}
-
-      for (int k=ks; k<=ke+1; ++k) {
-      for (int j=js; j<=je; ++j) {
-        pcoord->Face3Area(k,j,is-NGHOST,is-1,area);
-        pcoord->Edge1Length(k,j  ,is-NGHOST,is-1,len);
-        pcoord->Edge1Length(k,j+1,is-NGHOST,is-1,len_p1);
-        for (int i=is-NGHOST; i<=is-1; ++i) {
-	  // across the pole, we should use j index quantities to minus j+1 index quantities, but x3f should also flip sign
-          if(pcoord->x2v(j)<0.0||pcoord->x2v(j)>PI) {  
-            bb.x3f(k,j,i) -= (len_p1(i)*a1(k,j+1,i) - len(i)*a1(k,j,i))/area(i);
-          }else{
-            bb.x3f(k,j,i) -= (len_p1(i)*a1(k,j+1,i) - len(i)*a1(k,j,i))/area(i);
-          }
-        }
-      }}
-    }
-
-    if (pmb->block_size.nx3 > 1) {
-      for (int k=ks; k<=ke; ++k) {
-      for (int j=js; j<=je; ++j) {
-        pcoord->Face1Area(k,j,is-NGHOST,is-1,area);
-        pcoord->Edge2Length(k  ,j,is-NGHOST,is-1,len);
-        pcoord->Edge2Length(k+1,j,is-NGHOST,is-1,len_p1);
-        for (int i=is-NGHOST; i<=is-1; ++i) {
-          bb.x1f(k,j,i) -= (len_p1(i)*a2(k+1,j,i) - len(i)*a2(k,j,i))/area(i);
-        }
-      }}
-
-      for (int k=ks; k<=ke; ++k) {
-        // reset loop limits for polar boundary
-        int jl=js; int ju=je+1;
-        for (int j=jl; j<=ju; ++j) {
-          pcoord->Face2Area(k,j,is-NGHOST,is-1,area);
-          pcoord->Edge1Length(k  ,j,is-NGHOST,is-1,len);
-          pcoord->Edge1Length(k+1,j,is-NGHOST,is-1,len_p1);
-          for (int i=is-NGHOST; i<=is-1; ++i) {
-	    // x2f should flip sign across the pole
-            if(pcoord->x2f(j)<0.0-eps||pcoord->x2f(j)>PI+eps) { 
-              bb.x2f(k,j,i) -= (len_p1(i)*a1(k+1,j,i) - len(i)*a1(k,j,i))/area(i);
-            }else{
-              if(pcoord->x2f(j)>0.0+eps&&pcoord->x2f(j)<PI-eps) {
-                bb.x2f(k,j,i) += (len_p1(i)*a1(k+1,j,i) - len(i)*a1(k,j,i))/area(i);
-              }
-            }
-          }
-        }
-      }
-    }
-
-// calculate the pole Btheta magnetic flux at the pole by averaging two adjcent cells
-    for (int k=ks; k<=ke; ++k) {
-      for (int j=js; j<=je+1; ++j) {
-        for (int i=is-NGHOST; i<=is-1; ++i) {
-          if(pcoord->x2f(j)>0-eps && pcoord->x2f(j)<0.0+eps) 
-	    bb.x2f(k,j,i) = 0.5*(bb.x2f(k,j-1,i)+bb.x2f(k,j+1,i));
-          if(pcoord->x2f(j)>PI-eps && pcoord->x2f(j)<PI+eps) 
-	    bb.x2f(k,j,i) = 0.5*(bb.x2f(k,j-1,i)+bb.x2f(k,j+1,i));
-        }
-      }
-    }
-
-    a1.DeleteAthenaArray();
-    a2.DeleteAthenaArray();
-    a3.DeleteAthenaArray();
-    area.DeleteAthenaArray();
-    len.DeleteAthenaArray();
-    len_p1.DeleteAthenaArray();
-
-  }
-
-  return;
-}
-
-// Field BC at inner X1: copy 
-void FieldOutflowInnerX1(MeshBlock *pmb, Coordinates *pcoord, AthenaArray<Real> &prim, FaceField &bb,
-                         Real time, Real dt, int is, int ie, int js, int je, int ks, int ke)
-{
-  // copy face-centered magnetic fields into ghost zones
-  if (MAGNETIC_FIELDS_ENABLED) {
-    for (int k=ks; k<=ke; ++k) {
-    for (int j=js; j<=je; ++j) {
-#pragma simd
-      for (int i=1; i<=(NGHOST); ++i) {
-        bb.x1f(k,j,(is-i)) = bb.x1f(k,j,is);
-      }
-    }}
-
-    for (int k=ks; k<=ke; ++k) {
-    for (int j=js; j<=je+1; ++j) {
-#pragma simd
-      for (int i=1; i<=(NGHOST); ++i) {
-        bb.x2f(k,j,(is-i)) = bb.x2f(k,j,is);
-      }
-    }}
-
-    for (int k=ks; k<=ke+1; ++k) {
-    for (int j=js; j<=je; ++j) {
-#pragma simd
-      for (int i=1; i<=(NGHOST); ++i) {
-        bb.x3f(k,j,(is-i)) = bb.x3f(k,j,is);
-      }
-    }}
-  }
-
-  return;
-}
-
-
-// Field BC at outer X1: reset field to initial condition
-void FieldSteadyOuterX1(MeshBlock *pmb, Coordinates *pcoord, AthenaArray<Real> &prim, FaceField &bb,
-                        Real time, Real dt, int is, int ie, int js, int je, int ks, int ke)
-{
-  if (MAGNETIC_FIELDS_ENABLED){
-    Real eps=pcoord->dx2f(0)/100.;
-
-    // Compute vector potential
-    AthenaArray<Real> a1,a2,a3;
-    int nx1 = (pmb->ie-pmb->is)+2 + 2*(NGHOST);
-    int nx2 = (pmb->je-pmb->js)+2 + 2*(NGHOST);
-    int nx3 = (pmb->ke-pmb->ks)+2 + 2*(NGHOST);
-    a1.NewAthenaArray(nx3,nx2,nx1);
-    a2.NewAthenaArray(nx3,nx2,nx1);
-    a3.NewAthenaArray(nx3,nx2,nx1);
-
-    for (int k=ks; k<=ke+1; k++) {
-      for (int j=js; j<=je+1; j++) {
-        for (int i=ie+1; i<=ie+NGHOST; i++) {
-          a1(k,j,i) = A1(pcoord->x1v(i), pcoord->x2f(j), pcoord->x3f(k));
-        }
-      }
-    }
-
-    for (int k=ks; k<=ke+1; k++) {
-      for (int j=js; j<=je; j++) {
-        for (int i=ie+1; i<=ie+NGHOST+1; i++) {
-          a2(k,j,i) = A2(pcoord->x1f(i), pcoord->x2v(j), pcoord->x3f(k));
-	}
-      }
-    }
-    
-    for (int k=ks; k<=ke; k++) {
-      for (int j=js; j<=je+1; j++) {
-        for (int i=ie+1; i<=ie+NGHOST+1; i++) {
-          a3(k,j,i) = A3(pcoord->x1f(i), pcoord->x2f(j), pcoord->x3v(k));
-	}
-      }
-    }
-
-    // Initialize interface fields
-    AthenaArray<Real> area,len,len_p1;
-    area.NewAthenaArray(nx1);
-    len.NewAthenaArray(nx1+1);
-    len_p1.NewAthenaArray(nx1+1);
-
-    for (int k=ks; k<=ke; ++k) {
-      // reset loop limits for polar boundary
-      int jl=js; int ju=je+1;
-      for (int j=jl; j<=ju; ++j) {
-        pcoord->Face2Area(k,j,ie+1,ie+NGHOST,area);
-        pcoord->Edge3Length(k,j,ie+1,ie+1+NGHOST,len);
-        for (int i=ie+1; i<=ie+NGHOST; ++i) {
-	  /* x2f should flip sign across the pole */
-          if(pcoord->x2f(j)<0.0-eps || pcoord->x2f(j)>PI+eps) { 
-            bb.x2f(k,j,i) = (len(i+1)*a3(k,j,i+1) - len(i)*a3(k,j,i))/area(i);
-          }else{
-            if(pcoord->x2f(j)>0.0+eps && pcoord->x2f(j)<PI-eps) 
-	      bb.x2f(k,j,i) = -(len(i+1)*a3(k,j,i+1) - len(i)*a3(k,j,i))/area(i);
-          }
-        }
-      }
-    }
-    for (int k=ks; k<=ke+1; ++k) {
-    for (int j=js; j<=je; ++j) {
-      pcoord->Face3Area(k,j,ie+1,ie+NGHOST,area);
-      pcoord->Edge2Length(k,j,ie+1,ie+1+NGHOST,len);
-      for (int i=ie+1; i<=ie+NGHOST; ++i) {
-	 /* x3f should flip sign across the pole */
-        if(pcoord->x2v(j)<0.0 || pcoord->x2v(j)>PI) { 
-          bb.x3f(k,j,i) = -(len(i+1)*a2(k,j,i+1) - len(i)*a2(k,j,i))/area(i);
-        }else{
-          bb.x3f(k,j,i) = (len(i+1)*a2(k,j,i+1) - len(i)*a2(k,j,i))/area(i);
-        }
-      }
-    }}
-    // 2D and 3D
-    if (pmb->block_size.nx2 > 1) {
-      for (int k=ks; k<=ke; ++k) {
-      for (int j=js; j<=je; ++j) {
-        pcoord->Face1Area(k,j,ie+2,ie+1+NGHOST,area);
-        pcoord->Edge3Length(k,j  ,ie+2,ie+1+NGHOST,len);
-        pcoord->Edge3Length(k,j+1,ie+2,ie+1+NGHOST,len_p1);
-        for (int i=ie+2; i<=ie+1+NGHOST; ++i) {
-	  /* should use j index quantities to minus j+1 index quantities */
-          if(pcoord->x2v(j)<0.0 || pcoord->x2v(j)>PI) { 
-            bb.x1f(k,j,i) = -(len_p1(i)*a3(k,j+1,i) - len(i)*a3(k,j,i))/area(i);
-          }else{
-            bb.x1f(k,j,i) = (len_p1(i)*a3(k,j+1,i) - len(i)*a3(k,j,i))/area(i);
-          }
-        }
-      }}
-      for (int k=ks; k<=ke+1; ++k) {
-      for (int j=js; j<=je; ++j) { 
-        pcoord->Face3Area(k,j,ie+1,ie+NGHOST,area);
-        pcoord->Edge1Length(k,j  ,ie+1,ie+NGHOST,len);
-        pcoord->Edge1Length(k,j+1,ie+1,ie+NGHOST,len_p1);
-        for (int i=ie+1; i<=ie+NGHOST; ++i) {
-	  /* across the pole, we should use j index quantities to minus j+1 index quantities, but x3f should also flip sign */
-          if(pcoord->x2v(j)<0.0||pcoord->x2v(j)>PI) { 
-            bb.x3f(k,j,i) -= (len_p1(i)*a1(k,j+1,i) - len(i)*a1(k,j,i))/area(i);          
-          }else{
-            bb.x3f(k,j,i) -= (len_p1(i)*a1(k,j+1,i) - len(i)*a1(k,j,i))/area(i);
-          }
-        } 
-      }}
-    } 
-    // 3D only
-    if (pmb->block_size.nx3 > 1) {
-      for (int k=ks; k<=ke; ++k) {
-      for (int j=js; j<=je; ++j) {
-        pcoord->Face1Area(k,j,ie+2,ie+1+NGHOST,area);
-        pcoord->Edge2Length(k  ,j,ie+2,ie+1+NGHOST,len);
-        pcoord->Edge2Length(k+1,j,ie+2,ie+1+NGHOST,len_p1);
-        for (int i=ie+2; i<=ie+1+NGHOST; ++i) {
-          bb.x1f(k,j,i) -= (len_p1(i)*a2(k+1,j,i) - len(i)*a2(k,j,i))/area(i);
-        }
-      }}
-      for (int k=ks; k<=ke; ++k) {
-        // reset loop limits for polar boundary
-        int jl=js; int ju=je+1;
-        for (int j=jl; j<=ju; ++j) {
-          pcoord->Face2Area(k,j,ie+1,ie+NGHOST,area);
-          pcoord->Edge1Length(k  ,j,ie+1,ie+NGHOST,len);
-          pcoord->Edge1Length(k+1,j,ie+1,ie+NGHOST,len_p1);
-          for (int i=ie+1; i<=ie+NGHOST; ++i) {
-	    /* x2f should flip sign across the pole */
-            if(pcoord->x2f(j)<0.0-eps||pcoord->x2f(j)>PI+eps) {
-              bb.x2f(k,j,i) -= (len_p1(i)*a1(k+1,j,i) - len(i)*a1(k,j,i))/area(i);
-            }else{
-              if(pcoord->x2f(j)>0.0+eps&&pcoord->x2f(j)<PI-eps) {
-                bb.x2f(k,j,i) += (len_p1(i)*a1(k+1,j,i) - len(i)*a1(k,j,i))/area(i);
-              }
-            }
-          }
-        }
-      }
-    }
-
-    // calculate the pole Btheta magnetic flux at the pole by averaging two adjcent cells
-    for (int k=ks; k<=ke; ++k) {
-      for (int j=js; j<=je+1; ++j) {
-        for (int i=ie+1; i<=ie+NGHOST; ++i) {
-          if(pcoord->x2f(j)>0-eps&&pcoord->x2f(j)<0.0+eps) 
-	    bb.x2f(k,j,i) = 0.5*(bb.x2f(k,j-1,i)+bb.x2f(k,j+1,i));
-          if(pcoord->x2f(j)>PI-eps&&pcoord->x2f(j)<PI+eps) 
-	    bb.x2f(k,j,i) = 0.5*(bb.x2f(k,j-1,i)+bb.x2f(k,j+1,i));
-        }
-      }
-    }
-
-    a1.DeleteAthenaArray();
-    a2.DeleteAthenaArray();
-    a3.DeleteAthenaArray();
-    area.DeleteAthenaArray();
-    len.DeleteAthenaArray();
-    len_p1.DeleteAthenaArray();
-  }
-
-
-  return;
-}
-
-// Field BC at outer X1: copy
-void FieldOutflowOuterX1(MeshBlock *pmb, Coordinates *pcoord, AthenaArray<Real> &prim, FaceField &bb,
-                         Real time, Real dt, int is, int ie, int js, int je, int ks, int ke)
-{
-  // copy face-centered magnetic fields into ghost zones
-  if (MAGNETIC_FIELDS_ENABLED) {
-    for (int k=ks; k<=ke; ++k) {
-    for (int j=js; j<=je; ++j) {
-#pragma simd
-      for (int i=1; i<=(NGHOST); ++i) {
-        bb.x1f(k,j,(ie+i+1)) = bb.x1f(k,j,(ie+1));
-      }
-    }}
-
-    for (int k=ks; k<=ke; ++k) { 
-    for (int j=js; j<=je+1; ++j) {
-#pragma simd
-      for (int i=1; i<=(NGHOST); ++i) {
-        bb.x2f(k,j,(ie+i)) = bb.x2f(k,j,ie);
-      }
-    }}
-
-    for (int k=ks; k<=ke+1; ++k) {
-    for (int j=js; j<=je; ++j) {
-#pragma simd
-      for (int i=1; i<=(NGHOST); ++i) {
-        bb.x3f(k,j,(ie+i)) = bb.x3f(k,j,ie);
-      }
-    }}
-  }
-}
-
-// Field BC at inner X2: outflow
-void FieldOutflowInnerX2(MeshBlock *pmb, Coordinates *pcoord, AthenaArray<Real> &prim, FaceField &bb,
-                         Real time, Real dt, int is, int ie, int js, int je, int ks, int ke)
-{
-  // copy face-centered magnetic fields into ghost zones
-  if (MAGNETIC_FIELDS_ENABLED) {
-    for (int k=ks; k<=ke; ++k) {
-    for (int j=1; j<=(NGHOST); ++j) {
-#pragma simd
-      for (int i=is; i<=ie+1; ++i) {
-        bb.x1f(k,(js-j),i) = bb.x1f(k,js,i);
-      }
-    }}
-
-    for (int k=ks; k<=ke; ++k) {
-    for (int j=1; j<=(NGHOST); ++j) {
-#pragma simd
-      for (int i=is; i<=ie; ++i) {
-        bb.x2f(k,(js-j),i) = bb.x2f(k,js,i);
-      }
-    }}
-
-    for (int k=ks; k<=ke+1; ++k) {
-    for (int j=1; j<=(NGHOST); ++j) {
-#pragma simd
-      for (int i=is; i<=ie; ++i) {
-        bb.x3f(k,(js-j),i) = bb.x3f(k,js,i);
-      }
-    }}
-  }
-
-  return;
-}
-
-// Field BC at outer X2: outflow
-void FieldOutflowOuterX2(MeshBlock *pmb, Coordinates *pcoord, AthenaArray<Real> &prim, FaceField &bb,
-                         Real time, Real dt, int is, int ie, int js, int je, int ks, int ke)
-{
-  // copy face-centered magnetic fields into ghost zones
-  if (MAGNETIC_FIELDS_ENABLED) {
-    for (int k=ks; k<=ke; ++k) {
-    for (int j=1; j<=(NGHOST); ++j) {
-#pragma simd
-      for (int i=is; i<=ie+1; ++i) {
-        bb.x1f(k,(je+j  ),i) = bb.x1f(k,(je  ),i);
-      }
-    }}
-
-    for (int k=ks; k<=ke; ++k) {
-    for (int j=1; j<=(NGHOST); ++j) {
-#pragma simd
-      for (int i=is; i<=ie; ++i) {
-        bb.x2f(k,(je+j+1),i) = bb.x2f(k,(je+1),i);
-      }
-    }}
-
-    for (int k=ks; k<=ke+1; ++k) {
-    for (int j=1; j<=(NGHOST); ++j) {
-#pragma simd
-      for (int i=is; i<=ie; ++i) {
-        bb.x3f(k,(je+j  ),i) = bb.x3f(k,(je  ),i);
-      }
-    }}
-  }
-}
-
-void FieldDivFreeInnerX1(MeshBlock *pmb, Coordinates *pcoord, AthenaArray<Real> &prim, FaceField &bb,
-                         Real time, Real dt, int is, int ie, int js, int je, int ks, int ke)
-{
-}
-
-void FieldDivFreeOuterX1(MeshBlock *pmb, Coordinates *pcoord, AthenaArray<Real> &prim, FaceField &bb,
-                         Real time, Real dt, int is, int ie, int js, int je, int ks, int ke)
-{
-}
-
-void FieldInflowOuterX1(MeshBlock *pmb, Coordinates *pcoord, AthenaArray<Real> &prim, FaceField &bb,
-                        Real time, Real dt, int is, int ie, int js, int je, int ks, int ke)
-{
-}
-
-void FieldInflowAdvectOuterX1(MeshBlock *pmb, Coordinates *pcoord, AthenaArray<Real> &prim, FaceField &bb,
-                              Real time, Real dt, int is, int ie, int js, int je, int ks, int ke)
-{
-}
-
-void FieldInflowVerticalOuterX1(MeshBlock *pmb, Coordinates *pcoord, AthenaArray<Real> &prim, FaceField &bb,
-                                Real time, Real dt, int is, int ie, int js, int je, int ks, int ke)
-{
-}
-
 void MeshBlock::InitUserMeshBlockData(ParameterInput *pin)
 {
   int nuser_out=pin->GetOrAddInteger("mesh","nuser_out_var",0);
@@ -2293,567 +1577,7 @@ void MeshBlock::InitUserMeshBlockData(ParameterInput *pin)
   return;
 } 
 
-// Real PlanetForce(MeshBlock *pmb, int iout)
-// {
-//   Coordinates *pco = pmb->pcoord;
-//   if (psys->np > 0) {
-//     vol.NewAthenaArray((pmb->ie-pmb->is)+1+2*(NGHOST));
-//     for (int ip=0; ip< psys->np; ++ip){
-//       Real f_xpp = 0.0;
-//       Real f_ypp = 0.0;
-//       Real f_zpp = 0.0;
-//       Real xpp=psys->xp[ip];
-//       Real ypp=psys->yp[ip];
-//       Real zpp=psys->zp[ip];
-//       Real mp;
-//       if(pmb->pmy_mesh->time<insert_start){
-//         mp = 0.0;
-//       }else{
-//         mp = 1.0*std::min(1.0,((pmb->pmy_mesh->time-insert_start+1.e-10)/(insert_time+1.e-10)))*psys->mass[ip];
-//       }
-//       for (int k=pmb->ks; k<=pmb->ke; ++k) {
-//         Real x3=pco->x3v(k);
-//         Real cosx3=cos(x3);
-//         Real sinx3=sin(x3);
-//         for (int j=pmb->js; j<=pmb->je; ++j) {
-// 	        pco->CellVolume(k,j,pmb->is,pmb->ie,vol);
-//           Real x2=pco->x2v(j);
-//           Real cosx2=cos(x2);
-//           Real sinx2=sin(x2);
-//           for (int i=pmb->is; i<=pmb->ie; ++i) {
-//             Real drs = pco->dx1v(i) / 10000.;
-//             Real xcar = pco->x1v(i)*sinx2*cosx3;
-//             Real ycar = pco->x1v(i)*sinx2*sinx3;
-//             Real zcar = pco->x1v(i)*cosx2; 
-// 	          f_xpp += vol(i)*pmb->phydro->u(IDN,k,j,i)*(
-//                 grav_pot_car_btoa(xcar+drs, ycar, zcar,xpp,ypp,zpp,mp)-grav_pot_car_btoa(xcar-drs, ycar, zcar,xpp,ypp,zpp,mp)
-//               )/(2.0*drs);
-//             f_ypp += vol(i)*pmb->phydro->u(IDN,k,j,i)*(
-//                 grav_pot_car_btoa(xcar, ycar+drs, zcar,xpp,ypp,zpp,mp)-grav_pot_car_btoa(xcar, ycar-drs, zcar,xpp,ypp,zpp,mp)
-//               )/(2.0*drs);
-//             f_zpp += vol(i)*pmb->phydro->u(IDN,k,j,i)*(
-//                 grav_pot_car_btoa(xcar, ycar, zcar+drs,xpp,ypp,zpp,mp)-grav_pot_car_btoa(xcar, ycar, zcar-drs,xpp,ypp,zpp,mp)
-//               )/(2.0*drs);
-// /*
-//             if(ind!=0){
-//                 f_xpp += -mp*(grav_pot_car_ind(xcar+drs, ycar, zcar,xpp,ypp,zpp,mp)
-//                                 -grav_pot_car_ind(xcar-drs, ycar, zcar,xpp,ypp,zpp,mp))/(2.0*drs);
-//                 f_ypp += -mp*(grav_pot_car_ind(xcar, ycar+drs, zcar,xpp,ypp,zpp,mp)
-//                                 -grav_pot_car_ind(xcar, ycar-drs, zcar,xpp,ypp,zpp,mp))/(2.0*drs);
-//                 f_zpp += -mp*(grav_pot_car_ind(xcar, ycar, zcar+drs,xpp,ypp,zpp,mp)
-//                                 -grav_pot_car_ind(xcar, ycar, zcar-drs,xpp,ypp,zpp,mp))/(2.0*drs);
-//             }
-// */
-// 	        }
-// 	      }
-//       }
-//       if (iout==0&&ip==0) return f_xpp;
-//       if (iout==1&&ip==0) return f_ypp; 
-//       if (iout==2&&ip==0) return f_zpp; 
-//     }
-//   }
-// } 
 
-/* only did this in the last substep */
-// void MeshBlock::UserWorkInLoop(void)
-// {
-//   if(psys->np>0){
-//     if(prev == NULL) {
-//       psys->disktoplanet(pmy_mesh->dt);
-//       if(fixorb==1) psys->fixorbit(pmy_mesh->dt);
-//       else psys->integrate(pmy_mesh->dt);
-//       if(omegarot!=0.0) psys->Rotframe(pmy_mesh->dt);
-//     }
-//   }
-
-//   if (ionization==1){
-//     Real *surfx1send, *surfx1receive;
-//     int nx1 = (ie-is)+1 + 2*(NGHOST);
-//     int nx2 = (je-js)+1 + 2*(NGHOST);
-//     int nx3 = (ke-ks)+1;
-//     int kl, ku;
-//     if(block_size.nx3 > 1) {
-//       nx3 = nx3 + 2*(NGHOST);
-//       kl = ks - NGHOST;
-//       ku = ke + NGHOST;
-//     }else{
-//       kl = ks;
-//       ku = ke;
-//     }
-//     surfx1receive=new Real[nx3*nx2];
-//     int offset;
-
-//     // do all these work in the first meshblock within the process
-//     if(prev == NULL) {
-//       MeshBlock *pmb;
-//       pmb = this;
-//       // calculate local meshblock surface density in x1 direction
-//       while (pmb != NULL)  {
-//         pmb->iuser_meshblock_data[0](0)=pmb->loc.lx1;
-//         pmb->iuser_meshblock_data[0](1)=pmb->loc.lx1;
-//         for (int k=kl; k<=ku; k++) {
-//           for (int j=pmb->js-NGHOST; j<=pmb->je+NGHOST; j++) {
-//             for (int i=pmb->is-NGHOST+1; i<=pmb->ie+NGHOST; i++) {
-//               pmb->ruser_meshblock_data[0](k,j,i) = pmb->ruser_meshblock_data[0](k,j,i-1) + 0.5*(pmb->phydro->u(IDN,k,j,i)+pmb->phydro->u(IDN,k,j,i-1))*pmb->pcoord->dx1v(i-1);
-// 	      pmb->ruser_meshblock_data[1](k,j,i) = pmb->ruser_meshblock_data[0](k,j,i);
-//             }
-//           }
-//         }
-//         pmb=pmb->next;
-//       }
-
-//       // calculate local surface density within the process
-//       pmb = this;
-//       while (pmb != NULL)  {
-//         MeshBlock *pmbs;
-//         pmbs = this;
-//         while (pmbs != NULL) {
-//           if(pmbs->loc.lx2==pmb->loc.lx2 && pmbs->loc.lx3==pmb->loc.lx3 && pmbs->loc.lx1<pmb->loc.lx1){
-//             for (int k=kl; k<=ku; k++) {
-//               for (int j=pmb->js-NGHOST; j<=pmb->je+NGHOST; j++) {
-//                 for (int i=pmb->is-NGHOST+1; i<=pmb->ie+NGHOST; i++) {
-//                   pmb->ruser_meshblock_data[1](k,j,i) = pmb->ruser_meshblock_data[1](k,j,i) + pmbs->ruser_meshblock_data[0](k,j,pmbs->ie-NGHOST+1);
-//                 }
-//               }
-//             }
-// 	    if(pmbs->iuser_meshblock_data[0](1)<pmb->loc.lx1) pmbs->iuser_meshblock_data[0](1)=pmb->loc.lx1;
-//             if(pmb->iuser_meshblock_data[0](0)>pmbs->loc.lx1) pmb->iuser_meshblock_data[0](0)=pmbs->loc.lx1;
-//           }
-// 	  pmbs=pmbs->next;
-//         }
-//         pmb=pmb->next;
-//       }
-
-//       // send the surface density if it is within the process close to the inner boundary
-//       pmb = this;
-//       while (pmb != NULL)  {
-//         if(pmb->iuser_meshblock_data[0](0)==0){
-//           LogicalLocation loc0;
-//           int nrbx1 = pmb->pmy_mesh->nrbx1; // meshblock number at the root level
-//           int nbx1 = nrbx1 << (pmb->loc.level-pmb->pmy_mesh->root_level);
-//           enum {TAG_SURF=11};
-//           int tag;
-// #ifdef MPI_PARALLEL
-//           MPI_Status status;
-//           MPI_Request send_request, recv_request;
-// #endif
-//           loc0.lx2 = pmb->loc.lx2, loc0.lx3 = pmb->loc.lx3, loc0.level = pmb->loc.level;
-
-//           if(pmb->iuser_meshblock_data[0](1)<nbx1-1){
-//             loc0.lx1 = pmb->loc.lx1+1;
-//             MeshBlockTree *mbt = pmb->pmy_mesh->tree.FindMeshBlock(loc0);
-//             if(pmb->pmy_mesh->ranklist[mbt->gid] != Globals::my_rank){
-//               Real *pdata=pmb->ruser_meshblock_data[2].data();
-//               offset = 0;
-//               for (int k=kl; k<=ku; k++) {
-//                 for (int j=pmb->js-NGHOST; j<=pmb->je+NGHOST; j++) {
-//                   pdata[offset++]=pmb->ruser_meshblock_data[1](k,j,ie-NGHOST+1);
-//                 }
-//               }
-//               tag = (pmb->lid<<5)|TAG_SURF;
-// #ifdef MPI_PARALLEL
-//               MPI_Isend(pdata, nx3*nx2, MPI_ATHENA_REAL, pmb->pmy_mesh->ranklist[mbt->gid], tag, MPI_COMM_WORLD, &send_request);
-//               MPI_Request_free(&send_request);
-// #endif
-//             }
-//           }
-//         }
-//         pmb=pmb->next;
-//       }
-
-//       pmb = this;
-//       while (pmb != NULL)  { 
-// 	// if not at the process close to the inner boundary, recieve the data and transfer
-//         if(pmb->iuser_meshblock_data[0](0)>0) {
-//           LogicalLocation loc0;
-//           long int lx1;
-//           int nrbx1 = pmb->pmy_mesh->nrbx1; // meshblock number at the root level
-//           int nbx1 = nrbx1 << (pmb->loc.level-pmb->pmy_mesh->root_level);
-//           enum {TAG_SURF=11};
-//           int tag;
-// #ifdef MPI_PARALLEL
-//           MPI_Status status;
-//           MPI_Request send_request, recv_request;
-// #endif
-//           loc0.lx2 = pmb->loc.lx2, loc0.lx3 = pmb->loc.lx3, loc0.level = pmb->loc.level;
-
-
-//           loc0.lx1 = pmb->loc.lx1-1;
-//           MeshBlockTree *mbt = pmb->pmy_mesh->tree.FindMeshBlock(loc0); // left grid
-//           // add the surface density coming from the left grid
-//           if(pmb->pmy_mesh->ranklist[mbt->gid] != Globals::my_rank){
-//             int nlid=mbt->gid - pmb->pmy_mesh->nslist[pmb->pmy_mesh->ranklist[mbt->gid]]; 
-//             tag = (nlid<<5)|TAG_SURF;
-// 	   #ifdef MPI_PARALLEL
-//             MPI_Irecv(surfx1receive, nx3*nx2, MPI_ATHENA_REAL, pmb->pmy_mesh->ranklist[mbt->gid], tag, MPI_COMM_WORLD, &recv_request);
-// 	    MPI_Wait(&recv_request, &status);
-// #endif
-// 	    MeshBlock *pmbs;
-// 	    pmbs = this;
-// 	    // when recieved the passed data, update all the meshblocks within the process at the same theta
-//             while (pmbs != NULL) {
-//               if(pmbs->loc.lx2==pmb->loc.lx2 && pmbs->loc.lx3==pmb->loc.lx3){
-// 	        offset=0;
-//                 for (int k=kl; k<=ku; k++) {
-//                   for (int j=pmb->js-NGHOST; j<=pmb->je+NGHOST; j++) {
-// 	            pmbs->ruser_meshblock_data[1](k,j,is-NGHOST)=surfx1receive[offset++];
-//                     for (int i=pmb->is-NGHOST+1; i<=pmb->ie+NGHOST; i++) {
-//                       pmbs->ruser_meshblock_data[1](k,j,i) = pmbs->ruser_meshblock_data[1](k,j,i)+pmbs->ruser_meshblock_data[1](k,j,is-NGHOST);
-// 		    }
-// 	          }
-// 	        }
-// 	      }
-// 	      pmbs=pmbs->next;
-// 	    }	  
-//           }  
-
-// 	  // send the data if the block is at the edge of the process and not at the mesh boundary
-//           if(pmb->iuser_meshblock_data[0](1)<nbx1-1){
-//   	    loc0.lx1 = pmb->loc.lx1+1;
-// 	    MeshBlockTree *mbt = pmb->pmy_mesh->tree.FindMeshBlock(loc0);
-// 	    if(pmb->pmy_mesh->ranklist[mbt->gid] != Globals::my_rank){
-//               Real *pdata=pmb->ruser_meshblock_data[2].data();
-// 	      offset = 0;
-// 	      for (int k=kl; k<=ku; k++) {
-//                 for (int j=pmb->js-NGHOST; j<=pmb->je+NGHOST; j++) {
-// 	          pdata[offset++]=pmb->ruser_meshblock_data[1](k,j,ie-NGHOST+1);
-//                 }
-// 	      }
-//               tag = (pmb->lid<<5)|TAG_SURF;
-// 	     #ifdef MPI_PARALLEL
-//               MPI_Isend(pdata, nx3*nx2, MPI_ATHENA_REAL, pmb->pmy_mesh->ranklist[mbt->gid], tag, MPI_COMM_WORLD, &send_request);
-// 	      MPI_Request_free(&send_request);
-// 	     #endif
-// 	    }
-//           }
-//         }
-//         pmb=pmb->next;
-//       }
-//     }
-
-//     // calculate x2 local surface density
-//     for (int k=kl; k<=ku; k++) {
-//       for (int i=is-NGHOST; i<=ie+NGHOST; i++) {
-//         for (int j=js-NGHOST+1; j<=je+NGHOST; j++) {
-//           ruser_meshblock_data[5](k,j,i) = ruser_meshblock_data[5](k,j-1,i) + 0.5*(phydro->u(IDN,k,j,i)+phydro->u(IDN,k,j-1,i))*pcoord->x1v(i)*pcoord->dx2v(j-1);
-//         }
-//       }
-//     }
-
-
-//     // convert unit to cgs
-
-//     for (int k=kl; k<=ku; k++) {
-//       for (int j=js-NGHOST; j<=je+NGHOST; j++) {
-//         for (int i=is-NGHOST; i<=ie+NGHOST; i++) {
-//           ruser_meshblock_data[1](k,j,i)=ruser_meshblock_data[1](k,j,i)*MUNIT/LUNIT/LUNIT/2.35/1.66054e-24;
-// 	  ruser_meshblock_data[5](k,j,i)=ruser_meshblock_data[5](k,j,i)*MUNIT/LUNIT/LUNIT;
-// 	  ruser_meshblock_data[3](k,j,i)=lumx/pcoord->x1v(i)/LUNIT/pcoord->x1v(i)/LUNIT/(phydro->u(IDN,k,j,i)*MUNIT/pow(LUNIT,3)/2.35/1.66054e-24);
-// 	  // update temperature
-//           Real tempnew, eint;
-// 	  if (ruser_meshblock_data[1](k,j,i)<1.e22){
-// 	    Real eta=log10(ruser_meshblock_data[3](k,j,i));
-// 	    tempnew=pow(10,(8.9362527959248299e-3*eta-4.0392424905367275/eta/eta)/(1.0+1.2870891083912458e1/eta+4.4233310301789743e1/eta/eta)+4.3469496951396964)/TEUNIT;
-// 	    if(tempnew < ruser_meshblock_data[4](k,j,i)) tempnew=ruser_meshblock_data[4](k,j,i);
-// 	    if(tempnew > 2.512e4/TEUNIT) tempnew=2.512e4/TEUNIT;
-// 	    eint=tempnew/1.37*phydro->u(IDN,k,j,i)/(gamma_gas-1.0);
-//           }else{
-// 	    tempnew = ruser_meshblock_data[4](k,j,i);
-// 	    eint=tempnew/2.35*phydro->u(IDN,k,j,i)/(gamma_gas-1.0);
-//           }
-//           phydro->u(IEN,k,j,i)=eint+0.5*(SQR(phydro->u(IM1,k,j,i))+SQR(phydro->u(IM2,k,j,i))
-//                                         +SQR(phydro->u(IM3,k,j,i)))/phydro->u(IDN,k,j,i);
-// 	  if (MAGNETIC_FIELDS_ENABLED){
-//             phydro->u(IEN,k,j,i) +=
-//               0.5*(SQR(0.5*(pfield->b.x1f(k,j,i+1) + pfield->b.x1f(k,j,i)))
-//                  + SQR(0.5*(pfield->b.x2f(k,j+1,i) + pfield->b.x2f(k,j,i)))
-//                  + SQR(0.5*(pfield->b.x3f(k+1,j,i) + pfield->b.x3f(k,j,i))));
-//           }
-// 	  // update ionization parameter
-// 	  Real xirad=1.e-19;
-//           Real xicr=1.e-16*exp(-ruser_meshblock_data[5](k,j,i)/96.);
-//           Real xixray=(lumx/1.e29)/pow(pcoord->x1v(i)*LUNIT/1.496e13,2.2)*
-// 		      (6.0e-12*exp(-pow(ruser_meshblock_data[1](k,j,i)/1.5e21,0.4))
-// 		       +1.0e-15*exp(-pow(ruser_meshblock_data[1](k,j,i)/7.0e23,0.65)));
-// 	  Real arec=3.e-6/sqrt(tempnew*TEUNIT);
-// 	  ruser_meshblock_data[7](k,j,i) = 
-//                 sqrt((xirad+xicr+xixray)/
-//                      (phydro->u(IDN,k,j,i)*MUNIT/LUNIT/LUNIT/LUNIT/2.35/1.66054e-24*arec))
-//                 +2.0e-5*exp(-pow(ruser_meshblock_data[5](k,j,i)/0.03,4));
-// 	  ruser_meshblock_data[10](k,j,i) = 2.75e13/LUNIT/LUNIT/LUNIT*TUNIT*MUNIT*
-//                                             phydro->u(IDN,k,j,i)*ruser_meshblock_data[7](k,j,i)*15./pow(pcoord->x1v(i),-1.5);
-//         }
-//       }
-//     }
-
-//     delete[] surfx1receive;
-
-
-//     if(ifov_flag==3){
-//       AthenaArray<Real> surfx1,eta,tdust,surfx2,xe,am;
-//       surfx1.InitWithShallowSlice(user_out_var,4,0,1);
-//       eta.InitWithShallowSlice(user_out_var,4,1,1);
-//       tdust.InitWithShallowSlice(user_out_var,4,2,1);
-//       surfx2.InitWithShallowSlice(user_out_var,4,3,1);
-//       xe.InitWithShallowSlice(user_out_var,4,4,1);
-//       am.InitWithShallowSlice(user_out_var,4,5,1);
-
-//       for (int k=kl; k<=ku; ++k) {
-//         for (int j=js-NGHOST; j<=je+NGHOST; ++j) {
-//           for (int i=is-NGHOST; i<=ie+NGHOST; ++i) {
-//             surfx1(k,j,i) = ruser_meshblock_data[1](k,j,i);
-//             eta(k,j,i) = ruser_meshblock_data[3](k,j,i);
-// 	    tdust(k,j,i) = ruser_meshblock_data[4](k,j,i);
-// 	    surfx2(k,j,i) = ruser_meshblock_data[5](k,j,i);
-// 	    xe(k,j,i) = ruser_meshblock_data[7](k,j,i);
-// 	    am(k,j,i) = ruser_meshblock_data[10](k,j,i);
-// //	    std::cout<<"surfx1 "<<surfx1(k,j,i)<<" surfx2 "<<surfx2(k,j,i)<<" tdust "<<tdust(k,j,i)<<std::endl;
-//           }
-//         }
-//       }
-//     }
-//   }
-
-// // Initialize Kepler velocity for User_in_loop
-
-
-//   if(ifov_flag==1 or ifov_flag==2){
-//     AthenaArray<Real> out_Vkepc, out_Vkepf1, out_Vkepf2;
-
-//     out_Vkepc.InitWithShallowSlice(user_out_var,4,0,1);
-//     out_Vkepf1.InitWithShallowSlice(user_out_var,4,1,1);
-//     out_Vkepf2.InitWithShallowSlice(user_out_var,4,2,1);
-//     Real x3c = pcoord->x3v(ks);
-//     Real v1, v2, v3;
-//     for (int j=js; j<=je; ++j) {
-//       for (int i=is; i<=ie; ++i) {
-//         Real x1c = pcoord->x1v(i);
-// 	Real x1f = pcoord->x1f(i);
-//         Real x2c = pcoord->x2v(j);
-// 	Real x2f = pcoord->x2f(j);
-// 	if(out_Vkepc(ks,j,i)==0.){
-//  //         VelProfile(x1c, x2c, x3c, phydro->u(IDN,ks,j,i), v1, v2, v3);
-//           out_Vkepc(ks,j,i) = v3;
-// 	}
-// 	if(out_Vkepf1(ks,j,i)==0.){
-//   //        VelProfile(x1f, x2c, x3c, phydro->u(IDN,ks,j,i), v1, v2, v3);	
-// 	  out_Vkepf1(ks,j,i) = v3;
-// 	}
-// 	if(out_Vkepf2(ks,j,i)==0.){
-// //	  VelProfile(x1c, x2f, x3c, phydro->u(IDN,ks,j,i), v1, v2, v3);
-//           out_Vkepf2(ks,j,i) = v3;
-// 	}
-//       }
-//     }
-//     for (int j=js; j<=je; ++j) {
-//       Real x1f = pcoord->x1f(ie+1);
-//       Real x2c = pcoord->x2v(j);
-//       if(out_Vkepf1(ks,j,ie+1)==0.){
-// //	VelProfile(x1f, x2c, x3c, phydro->u(IDN,ks,j,ie), v1, v2, v3);
-//         out_Vkepf1(ks,j,ie+1) = v3;	
-//       }
-//     }
-//     for (int i=is; i<=ie; ++i) {
-//       Real x1c = pcoord->x1v(i);
-//       Real x2f = pcoord->x2f(je+1);
-//       if(out_Vkepf2(ks,je+1,i)==0.){
-//   // 	VelProfile(x1c, x2f, x3c, phydro->u(IDN,ks,je,i), v1, v2, v3);
-// 	out_Vkepf2(ks,je+1,i) = v3;
-//       }
-//     }
-//   }
-
-
-//  if(ifov_flag==1 or ifov_flag==2){
-
-//   AthenaArray<Real> &x1flux=phydro->flux[X1DIR];
-//   AthenaArray<Real> &x2flux=phydro->flux[X2DIR];
-//   AthenaArray<Real> &x3flux=phydro->flux[X3DIR];
-  
-//   // output quantities to ifov
-
-//   if(ifov_flag==1){
-
-//     AthenaArray<Real> out_mass, out_AM;
-//     AthenaArray<Real> out_massflux1, out_massflux2, out_massflux3;
-//     AthenaArray<Real> out_AMflux1, out_AMflux2, out_AMflux3;
-//     AthenaArray<Real> out_Vkepc, out_Vkepf1, out_Vkepf2, out_dAM, out_dAMflux1, out_dAMflux2, out_rvk, out_tvk, out_pmass;
-
-//     if(nuser_out_var >= 17) {
-//       out_Vkepc.InitWithShallowSlice(user_out_var,4,0,1);
-//       out_Vkepf1.InitWithShallowSlice(user_out_var,4,1,1);
-//       out_Vkepf2.InitWithShallowSlice(user_out_var,4,2,1);
-//       out_mass.InitWithShallowSlice(user_out_var,4,3,1);
-//       out_AM.InitWithShallowSlice(user_out_var,4,4,1);
-//       out_massflux1.InitWithShallowSlice(user_out_var,4,5,1);
-//       out_massflux2.InitWithShallowSlice(user_out_var,4,6,1);
-//       out_massflux3.InitWithShallowSlice(user_out_var,4,7,1);
-//       out_AMflux1.InitWithShallowSlice(user_out_var,4,8,1);
-//       out_AMflux2.InitWithShallowSlice(user_out_var,4,9,1);
-//       out_AMflux3.InitWithShallowSlice(user_out_var,4,10,1);
-//       out_dAM.InitWithShallowSlice(user_out_var,4,11,1);
-//       out_dAMflux1.InitWithShallowSlice(user_out_var,4,12,1);
-//       out_dAMflux2.InitWithShallowSlice(user_out_var,4,13,1);
-//       out_rvk.InitWithShallowSlice(user_out_var,4,14,1);
-//       out_tvk.InitWithShallowSlice(user_out_var,4,15,1);
-//       out_pmass.InitWithShallowSlice(user_out_var,4,16,1);
-//     }
-
-//     Real dt = pmy_mesh->dt;
-  
-//     if(nuser_out_var >= 17) {
-//       if (block_size.nx3 > 1) {
-// #pragma omp for schedule(static)
-//         for (int k=ks; k<=ke; ++k) {
-//           for (int j=js; j<=je; ++j) {
-//             pcoord->CellVolume(k,j,is,ie,vol);
-//             pcoord->Face1Area(k,j,is,ie+1,x1area);
-//             pcoord->Face2Area(k,j  ,is,ie,x2area   );
-//             pcoord->Face2Area(k,j+1,is,ie,x2area_p1);
-//             pcoord->Face3Area(k  ,j,is,ie,x3area   );
-//             pcoord->Face3Area(k+1,j,is,ie,x3area_p1);
-//             for (int n=0; n<NHYDRO; ++n) {
-// 	      for (int i=is; i<=ie; ++i) { 
-// 	        if(n==IDN) {
-//                   out_mass(k,j,i) = phydro->u(n,k,j,i);
-//                   out_massflux1(k,j,i) -= dt*(x1area(i+1) *x1flux(n,k,j,i+1)
-//                                             - x1area(i)   *x1flux(n,k,j,i))/vol(i);
-//                   out_massflux2(k,j,i) -= dt*(x2area_p1(i)*x2flux(n,k,j+1,i)
-//                                             - x2area(i)   *x2flux(n,k,j,i))/vol(i);
-//                   out_massflux3(k,j,i) -= dt*(x3area_p1(i)*x3flux(n,k+1,j,i)
-//                                             - x3area(i)   *x3flux(n,k,j,i))/vol(i);
-// 	    	  out_pmass(k,j,i) += dt*(x3area_p1(i)*x3flux(n,k+1,j,i)
-//                                             - x3area(i)   *x3flux(n,k,j,i))/vol(i)*out_Vkepc(ks,j,i);
-//                 }
-//                 if(n==IM3) {
-//                   Real x1f=pcoord->x1f(i);
-//                   Real x1fp=pcoord->x1f(i+1);
-//                   Real x2f=pcoord->x2f(j);
-//                   Real x2fp=pcoord->x2f(j+1);
-//                   Real x1v=0.5*(x1f+x1fp);
-//                   Real sinx2c=0.5*(sin(pcoord->x2f(j))+sin(pcoord->x2f(j+1)));
-//                   out_AM(k,j,i) = phydro->u(n,k,j,i);
-// 	  	  out_dAM(k,j,i) = phydro->u(n,k,j,i)-phydro->u(IDN,k,j,i)*out_Vkepc(ks,j,i);
-//                   out_AMflux1(k,j,i) -= dt*(x1fp* x1area(i+1) *x1flux(n,k,j,i+1)
-//                                           - x1f * x1area(i)   *x1flux(n,k,j,i))/vol(i)/x1v;
-//                   out_AMflux2(k,j,i) -= dt*(sin(x2fp)*x2area_p1(i)*x2flux(n,k,j+1,i)
-//                                           - sin(x2f) *x2area(i)   *x2flux(n,k,j,i))/vol(i)/sinx2c;
-//                   out_AMflux3(k,j,i) -= dt*(x3area_p1(i)*x3flux(n,k+1,j,i)
-//                                           - x3area(i)   *x3flux(n,k,j,i))/vol(i);
-// 	  	  out_dAMflux1(k,j,i) -= dt*(x1fp* x1area(i+1) *(x1flux(n,k,j,i+1)-x1flux(IDN,k,j,i+1)*out_Vkepf1(ks,j,i+1))
-//                                           -  x1f * x1area(i)   *(x1flux(n,k,j,i)-x1flux(IDN,k,j,i)*out_Vkepf1(ks,j,i)))/vol(i)/x1v;
-//                   out_dAMflux2(k,j,i) -= dt*(sin(x2fp)*x2area_p1(i)*(x2flux(n,k,j+1,i)-x2flux(IDN,k,j+1,i)*out_Vkepf2(ks,j+1,i))
-//                                           - sin(x2f) *x2area(i)    *(x2flux(n,k,j,i)-x2flux(IDN,k,j,i)*out_Vkepf2(ks,j,i)))/vol(i)/sinx2c;
-//   		  out_rvk(k,j,i) -= dt*(x1area(i+1) *out_Vkepf1(ks,j,i+1)/x1fp
-//                                       - x1area(i)   *out_Vkepf1(ks,j,i)/x1f)*0.5*(x1flux(IDN,k,j,i+1)*x1fp*x1fp+x1flux(IDN,k,j,i)*x1f*x1f)/vol(i)/x1v;
-// 	          out_tvk(k,j,i) -= dt*(x2area_p1(i)*out_Vkepf2(ks,j+1,i)
-//                                       - x2area(i)   *out_Vkepf2(ks,j,i))*0.5*(x2flux(IDN,k,j+1,i)*sin(x2fp)+x2flux(IDN,k,j,i)*sin(x2f))/vol(i)/sinx2c;
-//                 }
-// 	      }
-//             }
-//           }
-//         }
-// //      std::cout<<"mass "<<out_mass(ks,(js+je)/2,is)<<" massflux1 "<<out_massflux1(ks,(js+je)/2,is)<<" massflux2 "<<out_massflux2(ks,(js+je)/2,is)<<" massflux3 " <<out_massflux3(ks,(js+je)/2,is)<<" tot "<<out_massflux1(ks,(js+je)/2,is)+out_massflux2(ks,(js+je)/2,is)+out_massflux3(ks,(js+je)/2,is)<<" AM "<<out_AM(ks,(js+je)/2,is)<<" AMflux1 "<<out_AMflux1(ks,(js+je)/2,is)<<" AMflux2 "<<out_AMflux2(ks,(js+je)/2,is)<<" AMflux3 "<<out_AMflux3(ks,(js+je)/2,is)<<" tot "<<out_AMflux1(ks,(js+je)/2,is)+out_AMflux2(ks,(js+je)/2,is)+out_AMflux3(ks,(js+je)/2,is)<<std::endl; 
-
-// //	std::cout<<"rank "<<Globals::my_rank<<"dAM "<<out_dAM(ks,(js+je)/2,is)<<" dAMflux1 "<<out_dAMflux1(ks,(js+je)/2,is)<<" dAMflux2 "<<out_dAMflux2(ks,(js+je)/2,is)<<" rvk "<<out_rvk(ks,(js+je)/2,is)<<" tvk "<<out_tvk(ks,(js+je)/2,is)<<" AMflux3 "<<out_AMflux3(ks,(js+je)/2,is)<<" pmass "<<out_pmass(ks,(js+je)/2,is)<<" tot "<<out_dAMflux1(ks,(js+je)/2,is)+out_dAMflux2(ks,(js+je)/2,is)+out_rvk(ks,(js+je)/2,is)+out_tvk(ks,(js+je)/2,is)+out_AMflux3(ks,(js+je)/2,is)+out_pmass(ks,(js+je)/2,is)<<std::endl;
-//       }
-//     }
-//   }
-
-//   if(ifov_flag==2){
-
-//     AthenaArray<Real> out_mflux1, out_mflux2, out_vflux1, out_vflux2, out_vflux1r, out_vflux2r, out_vflux1b, out_vflux2b, out_etaA,out_beta,out_Am,out_etaO,out_Lambda;
-//     AthenaArray<Real> out_Vkepc, out_Vkepf1, out_Vkepf2, out_dAM, out_dAMflux1, out_dAMflux2, out_rvk, out_tvk;
-
-//     if(nuser_out_var >= 16) {
-//       out_Vkepc.InitWithShallowSlice(user_out_var,4,0,1);
-//       out_Vkepf1.InitWithShallowSlice(user_out_var,4,1,1);
-//       out_Vkepf2.InitWithShallowSlice(user_out_var,4,2,1);
-//       out_mflux1.InitWithShallowSlice(user_out_var,4,3,1);
-//       out_mflux2.InitWithShallowSlice(user_out_var,4,4,1);
-//       out_dAM.InitWithShallowSlice(user_out_var,4,5,1);
-//       out_dAMflux1.InitWithShallowSlice(user_out_var,4,6,1);
-//       out_dAMflux2.InitWithShallowSlice(user_out_var,4,7,1);
-//       out_rvk.InitWithShallowSlice(user_out_var,4,8,1);
-//       out_tvk.InitWithShallowSlice(user_out_var,4,9,1);
-//       out_vflux1.InitWithShallowSlice(user_out_var,4,10,1);
-//       out_vflux2.InitWithShallowSlice(user_out_var,4,11,1);
-//       out_vflux1r.InitWithShallowSlice(user_out_var,4,12,1);
-//       out_vflux2r.InitWithShallowSlice(user_out_var,4,13,1);
-//       out_vflux1b.InitWithShallowSlice(user_out_var,4,14,1);
-//       out_vflux2b.InitWithShallowSlice(user_out_var,4,15,1);
-//       out_beta.InitWithShallowSlice(user_out_var,4,16,1);
-//      if(1){
-//       out_etaA.InitWithShallowSlice(user_out_var,4,17,1);
-//       out_Am.InitWithShallowSlice(user_out_var,4,18,1);
-//       out_etaO.InitWithShallowSlice(user_out_var,4,19,1);
-//       out_Lambda.InitWithShallowSlice(user_out_var,4,20,1);
-//       }
-//     }
-
-//     Real dt = pmy_mesh->dt;
-
-//     if(nuser_out_var >= 16) {
-//       if (block_size.nx3 > 1) {
-// #pragma omp for schedule(static)
-//         for (int k=ks; k<=ke; ++k) {
-//           for (int j=js; j<=je; ++j) {
-//             pcoord->CellVolume(k,j,is,ie,vol);
-//             pcoord->Face1Area(k,j,is,ie+1,x1area);
-//             pcoord->Face2Area(k,j  ,is,ie,x2area   );
-//             pcoord->Face2Area(k,j+1,is,ie,x2area_p1);
-//             pcoord->Face3Area(k  ,j,is,ie,x3area   );
-//             pcoord->Face3Area(k+1,j,is,ie,x3area_p1);
-//             for (int n=0; n<NHYDRO; ++n) {
-// 	      for (int i=is; i<=ie; ++i) { 
-// 	        if(n==IDN) {
-//                   out_mflux1(k,j,i) += dt*x1flux(n,k,j,i);
-//                   out_mflux2(k,j,i) += dt*x2flux(n,k,j,i);
-//                 }
-//                 if(n==IM3) {
-//                   Real x1f=pcoord->x1f(i);
-//                   Real x1fp=pcoord->x1f(i+1);
-//                   Real x2f=pcoord->x2f(j);
-//                   Real x2fp=pcoord->x2f(j+1);
-//                   Real x1v=0.5*(x1f+x1fp);
-//                   Real sinx2c=0.5*(sin(pcoord->x2f(j))+sin(pcoord->x2f(j+1)));
-// 	  	  out_dAM(k,j,i) = phydro->u(n,k,j,i)-phydro->u(IDN,k,j,i)*out_Vkepc(ks,j,i);
-// 	  	  out_dAMflux1(k,j,i) -= dt*(x1fp* x1area(i+1) *(x1flux(n,k,j,i+1)-x1flux(IDN,k,j,i+1)*out_Vkepf1(ks,j,i+1))
-//                                           -  x1f * x1area(i)   *(x1flux(n,k,j,i)-x1flux(IDN,k,j,i)*out_Vkepf1(ks,j,i)))/vol(i)/x1v;
-//                   out_dAMflux2(k,j,i) -= dt*(sin(x2fp)*x2area_p1(i)*(x2flux(n,k,j+1,i)-x2flux(IDN,k,j+1,i)*out_Vkepf2(ks,j+1,i))
-//                                           - sin(x2f) *x2area(i)    *(x2flux(n,k,j,i)-x2flux(IDN,k,j,i)*out_Vkepf2(ks,j,i)))/vol(i)/sinx2c;
-//   		  out_rvk(k,j,i) -= dt*(x1area(i+1) *out_Vkepf1(ks,j,i+1)/x1fp
-//                                       - x1area(i)   *out_Vkepf1(ks,j,i)/x1f)*0.5*(x1flux(IDN,k,j,i+1)*x1fp*x1fp+x1flux(IDN,k,j,i)*x1f*x1f)/vol(i)/x1v;
-// 	          out_tvk(k,j,i) -= dt*(x2area_p1(i)*out_Vkepf2(ks,j+1,i)
-//                                       - x2area(i)   *out_Vkepf2(ks,j,i))*0.5*(x2flux(IDN,k,j+1,i)*sin(x2fp)+x2flux(IDN,k,j,i)*sin(x2f))/vol(i)/sinx2c;
-// 		  out_vflux1(k,j,i) += dt*(x1flux(n,k,j,i)-x1flux(IDN,k,j,i)*out_Vkepf1(ks,j,i));
-// 		  out_vflux2(k,j,i) += dt*(x2flux(n,k,j,i)-x2flux(IDN,k,j,i)*out_Vkepf2(ks,j,i));
-// 		  out_vflux1r(k,j,i) += dt*phydro->u(IM1,k,j,i)*(0.25*(phydro->u(IM3,k,j,i)+phydro->u(IM3,k+1,j,i)+phydro->u(IM3,k,j,i-1)+phydro->u(IM3,k+1,j,i-1))/phydro->u(IDN,k,j,i)-out_Vkepf1(ks,j,i));
-// 		  out_vflux2r(k,j,i) += dt*phydro->u(IM2,k,j,i)*(0.25*(phydro->u(IM3,k,j,i)+phydro->u(IM3,k+1,j,i)+phydro->u(IM3,k,j-1,i)+phydro->u(IM3,k+1,j-1,i))/phydro->u(IDN,k,j,i)-out_Vkepf2(ks,j,i));
-// 		  if (MAGNETIC_FIELDS_ENABLED){
-// 	            out_vflux1b(k,j,i) -= dt*pfield->b.x1f(k,j,i)*0.25*(pfield->b.x3f(k,j,i)+pfield->b.x3f(k+1,j,i)+pfield->b.x3f(k,j,i-1)+pfield->b.x3f(k+1,j,i-1));
-// 		    out_vflux2b(k,j,i) -= dt*pfield->b.x2f(k,j,i)*0.25*(pfield->b.x3f(k,j,i)+pfield->b.x3f(k+1,j,i)+pfield->b.x3f(k,j-1,i)+pfield->b.x3f(k+1,j-1,i));
-// 		    if(pfield->pfdif->field_diffusion_defined) {
-//                       out_etaA(k,j,i) = pfield->pfdif->etaB(I_A, k,j,i);
-// 		      Real r = std::max(fabs(pcoord->x1v(i)*sin(pcoord->x2v(j))),xcut);
-//                       out_Am(k,j,i) = (SQR(pfield->bcc(IB1,k,j,i))+SQR(pfield->bcc(IB2,k,j,i))+SQR(pfield->bcc(IB3,k,j,i)))/pfield->pfdif->etaB(I_A, k,j,i)/pfield->pfdif->pmy_block->phydro->u(IDN,k,j,i)/sqrt(gm0/r/r/r);
-//                       out_etaO(k,j,i) = pfield->pfdif->etaB(I_O, k,j,i);
-//                       out_Lambda(k,j,i) = (SQR(pfield->bcc(IB1,k,j,i))+SQR(pfield->bcc(IB2,k,j,i))+SQR(pfield->bcc(IB3,k,j,i)))/pfield->pfdif->etaB(I_O, k,j,i)/pfield->pfdif->pmy_block->phydro->u(IDN,k,j,i)/sqrt(gm0/r/r/r);
-// 		    }
-//                     out_beta(k,j,i) = 2.0*(pfield->pfdif->pmy_block->phydro->u(IDN,k,j,i)*PoverR(pcoord->x1v(k),pcoord->x2v(j),pcoord->x3v(i)))/SQR(pfield->bcc(IB1,k,j,i)+pfield->bcc(IB2,k,j,i)+pfield->bcc(IB3,k,j,i));
-// 		  }
-//                 }
-// 	      }
-//             }
-//           }
-//         }
-//       }
-//     }
-//   }
-//  }
-
-//  return;
-// }
 
 //----------------------------------------------------------------------
 // f: cooling function with damping boundary
@@ -2868,44 +1592,35 @@ void Cooling(MeshBlock *pmb, const Real dt, const AthenaArray<Real> &prim,
      for (int j=pmb->js; j<=pmb->je; ++j) {
        Real sinx2=sin(pco->x2v(j));
        for (int i=pmb->is; i<=pmb->ie; ++i) {
- 	 if (cons(IDN,k,j,i)<rho_floor(pco->x1v(i),pco->x2v(j),pco->x3v(k))) {
-           cons(IDN,k,j,i)=rho_floor(pco->x1v(i),pco->x2v(j),pco->x3v(k));
-         }
-	 // to avoid the divergence at 0 for both Keplerian motion and p_over_r
-         Real r = std::max(fabs(pco->x1v(i)*sinx2),xcut);
-         Real eint = cons(IEN,k,j,i)-0.5*(SQR(cons(IM1,k,j,i))+SQR(cons(IM2,k,j,i))
-	 	                          +SQR(cons(IM3,k,j,i)))/cons(IDN,k,j,i);
-	 if (MAGNETIC_FIELDS_ENABLED){
-	   eint = eint-0.5*(SQR(bcc(IB1,k,j,i))+SQR(bcc(IB2,k,j,i))+SQR(bcc(IB3,k,j,i)));
-	 }
-         Real pres_over_r=eint*(gamma_gas-1.0)/cons(IDN,k,j,i);
-         Real p_over_r = PoverR(pco->x1v(i),pco->x2v(j),pco->x3v(k)); 
-	 // reset temperature when the temperature is below tlow times the initial temperature
-         if(tlow>0 && pres_over_r<tlow*p_over_r){
-           eint=tlow*p_over_r*cons(IDN,k,j,i)/(gamma_gas-1.0);
-	   cons(IEN,k,j,i)=eint+0.5*(SQR(cons(IM1,k,j,i))+SQR(cons(IM2,k,j,i))
+        if (cons(IDN,k,j,i)<rho_floor(pco->x1v(i),pco->x2v(j),pco->x3v(k))) {
+                cons(IDN,k,j,i)=rho_floor(pco->x1v(i),pco->x2v(j),pco->x3v(k));
+              }
+	      // to avoid the divergence at 0 for both Keplerian motion and p_over_r
+        Real r = std::max(fabs(pco->x1v(i)*sinx2),xcut);
+        Real eint = cons(IEN,k,j,i)-0.5*(SQR(cons(IM1,k,j,i))+SQR(cons(IM2,k,j,i))
+                            +SQR(cons(IM3,k,j,i)))/cons(IDN,k,j,i);
+        Real pres_over_r=eint*(gamma_gas-1.0)/cons(IDN,k,j,i);
+        Real p_over_r = PoverR(pco->x1v(i),pco->x2v(j),pco->x3v(k)); 
+	      // reset temperature when the temperature is below tlow times the initial temperature
+        if(tlow>0 && pres_over_r<tlow*p_over_r){
+          eint=tlow*p_over_r*cons(IDN,k,j,i)/(gamma_gas-1.0);
+	        cons(IEN,k,j,i)=eint+0.5*(SQR(cons(IM1,k,j,i))+SQR(cons(IM2,k,j,i))
 			             +SQR(cons(IM3,k,j,i)))/cons(IDN,k,j,i);
-           if (MAGNETIC_FIELDS_ENABLED){
-             cons(IEN,k,j,i)+=0.5*(SQR(bcc(IB1,k,j,i))+SQR(bcc(IB2,k,j,i))+SQR(bcc(IB3,k,j,i)));
-           }
          }
-	 // reset temperature when the temperature is above thigh times the initial temperature
-         if(thigh>0 && pres_over_r>thigh*p_over_r){
-           eint=thigh*p_over_r*cons(IDN,k,j,i)/(gamma_gas-1.0);
-	   cons(IEN,k,j,i)=eint+0.5*(SQR(cons(IM1,k,j,i))+SQR(cons(IM2,k,j,i))
+	      // reset temperature when the temperature is above thigh times the initial temperature
+        if(thigh>0 && pres_over_r>thigh*p_over_r){
+          eint=thigh*p_over_r*cons(IDN,k,j,i)/(gamma_gas-1.0);
+	        cons(IEN,k,j,i)=eint+0.5*(SQR(cons(IM1,k,j,i))+SQR(cons(IM2,k,j,i))
 				     +SQR(cons(IM3,k,j,i)))/cons(IDN,k,j,i);
-           if (MAGNETIC_FIELDS_ENABLED){
-             cons(IEN,k,j,i)+=0.5*(SQR(bcc(IB1,k,j,i))+SQR(bcc(IB2,k,j,i))+SQR(bcc(IB3,k,j,i)));
-           }
          }
-         Real dtr = std::max(tcool*2.*PI/sqrt(gm0/r/r/r),dt);
-         Real dfrac=dt/dtr;
-         Real dE=eint-p_over_r/(gamma_gas-1.0)*cons(IDN,k,j,i);
-         cons(IEN,k,j,i) -= dE*dfrac;
-       }
-     }
-   }
- }
+        Real dtr = std::max(tcool*2.*PI/sqrt(gm0/r/r/r),dt);
+        Real dfrac=dt/dtr;
+        Real dE=eint-p_over_r/(gamma_gas-1.0)*cons(IDN,k,j,i);
+        cons(IEN,k,j,i) -= dE*dfrac;
+      }
+    }
+  }
+}
  return;
 }
 
@@ -2925,51 +1640,43 @@ void Damp(MeshBlock *pmb, const Real dt, const AthenaArray<Real> &prim,
     for (int j=pmb->js; j<=pmb->je; ++j) {
       Real sinx2=sin(pco->x2v(j));
       for (int i=pmb->is; i<=pmb->ie; ++i) {
-	Real x1 = pco->x1v(i);
-	Real x2 = pco->x2v(j);
-	Real x3 = pco->x3v(k);
-        // to avoid the divergence at 0 for both Keplerian motion and p_over_r
-	Real r = std::max(fabs(x1*sinx2),xcut);
-        // damp timescale
-	ramp = 0.0;
-	if(x1 < rdi1){
-          ramp = (x1-rdi1)/(rdi1-xcut);
-          ramp = ramp*ramp;
-          tau = 2.0*PI*sqrt(r*r*r/gm0)*tdamp;
-        }
-        // desired quantities
-	Real den, v1, v2, v3, m1, m2, m3, eint;
-        den = DenProfile(x1, x2, x3);
+        Real x1 = pco->x1v(i);
+        Real x2 = pco->x2v(j);
+        Real x3 = pco->x3v(k);
+              // to avoid the divergence at 0 for both Keplerian motion and p_over_r
+        Real r = std::max(fabs(x1*sinx2),xcut);
+              // damp timescale
+        ramp = 0.0;
+        if(x1 < rdi1){
+                ramp = (x1-rdi1)/(rdi1-xcut);
+                ramp = ramp*ramp;
+                tau = 2.0*PI*sqrt(r*r*r/gm0)*tdamp;
+              }
+              // desired quantities
+        Real den, v1, v2, v3, m1, m2, m3, eint;
+              den = DenProfile(x1, x2, x3);
 
-        VelProfile(x1, x2, x3, den, v1, v2, v3);
-	m1 = den*v1;
-	m2 = den*v2;
-	m3 = den*v3;
-	if (NON_BAROTROPIC_EOS){
-	  Real p_over_r = PoverR(x1, x2, x3); 
-	  eint = p_over_r*den/(gamma_gas - 1.0);
-	}
-        // damp quantities 
-	if(ramp>0.0){
+              VelProfile(x1, x2, x3, den, v1, v2, v3);
+        m1 = den*v1;
+        m2 = den*v2;
+        m3 = den*v3;
+        if (NON_BAROTROPIC_EOS){
+          Real p_over_r = PoverR(x1, x2, x3); 
+          eint = p_over_r*den/(gamma_gas - 1.0);
+        }
+              // damp quantities 
+        if(ramp>0.0){
           lambda = ramp/tau*dt;
-	  cons(IDN,k,j,i)=(cons(IDN,k,j,i)+lambda*den)/(1.+lambda);
+          cons(IDN,k,j,i)=(cons(IDN,k,j,i)+lambda*den)/(1.+lambda);
           cons(IM1,k,j,i)=(cons(IM1,k,j,i)+lambda*m1)/(1.+lambda);
           cons(IM2,k,j,i)=(cons(IM2,k,j,i)+lambda*m2)/(1.+lambda);     
           cons(IM3,k,j,i)=(cons(IM3,k,j,i)+lambda*m3)/(1.+lambda);
           if(NON_BAROTROPIC_EOS) {
-	    if (MAGNETIC_FIELDS_ENABLED){
-              e_nomag = cons(IEN,k,j,i) - 0.5*(SQR(bcc(IB1,k,j,i))+SQR(bcc(IB2,k,j,i))+SQR(bcc(IB3,k,j,i)));
-            }else{
-	      e_nomag = cons(IEN,k,j,i); 
-	    }
-	    e_nomag=(e_nomag+lambda*(eint+0.5*(m1*m1+m2*m2+m3*m3)/den))/(1.+lambda);
-	    if (MAGNETIC_FIELDS_ENABLED){
-              cons(IEN,k,j,i) = e_nomag + 0.5*(SQR(bcc(IB1,k,j,i))+SQR(bcc(IB2,k,j,i))+SQR(bcc(IB3,k,j,i)));
-            }else{
-              cons(IEN,k,j,i) = e_nomag;
-            }
-	  }	  
-	}
+            e_nomag = cons(IEN,k,j,i); 
+            e_nomag=(e_nomag+lambda*(eint+0.5*(m1*m1+m2*m2+m3*m3)/den))/(1.+lambda);
+            cons(IEN,k,j,i) = e_nomag;
+          }  
+        }
       }
     }
   }
@@ -3109,7 +1816,7 @@ void PlanetarySourceTerms(
             Real ypp=psys->yp[ip];
             Real zpp=psys->zp[ip];
             Real mp;
-  	    /* insert the planet at insert_start and gradually increase its mass during insert_time */
+  	        /* insert the planet at insert_start and gradually increase its mass during insert_time */
             if(time<insert_start){
               mp = 0.0;
             }else{
@@ -3122,14 +1829,14 @@ void PlanetarySourceTerms(
   	 		        -grav_pot_car_btoa(xcar, ycar-drs, zcar,xpp,ypp,zpp,mp))/(2.0*drs);
             Real f_zca = -1.0* (grav_pot_car_btoa(xcar, ycar, zcar+drs,xpp,ypp,zpp,mp)
 			        -grav_pot_car_btoa(xcar, ycar, zcar-drs,xpp,ypp,zpp,mp))/(2.0*drs);
-	    if(ind!=0){
-		f_xca += -1.0* (grav_pot_car_ind(xcar+drs, ycar, zcar,xpp,ypp,zpp,mp)
-                                -grav_pot_car_ind(xcar-drs, ycar, zcar,xpp,ypp,zpp,mp))/(2.0*drs);
-            	f_yca += -1.0* (grav_pot_car_ind(xcar, ycar+drs, zcar,xpp,ypp,zpp,mp)
-                                -grav_pot_car_ind(xcar, ycar-drs, zcar,xpp,ypp,zpp,mp))/(2.0*drs);
-            	f_zca += -1.0* (grav_pot_car_ind(xcar, ycar, zcar+drs,xpp,ypp,zpp,mp)
-                                -grav_pot_car_ind(xcar, ycar, zcar-drs,xpp,ypp,zpp,mp))/(2.0*drs);
-	    }
+            if(ind!=0){
+              f_xca += -1.0* (grav_pot_car_ind(xcar+drs, ycar, zcar,xpp,ypp,zpp,mp)
+                                      -grav_pot_car_ind(xcar-drs, ycar, zcar,xpp,ypp,zpp,mp))/(2.0*drs);
+              f_yca += -1.0* (grav_pot_car_ind(xcar, ycar+drs, zcar,xpp,ypp,zpp,mp)
+                                      -grav_pot_car_ind(xcar, ycar-drs, zcar,xpp,ypp,zpp,mp))/(2.0*drs);
+              f_zca += -1.0* (grav_pot_car_ind(xcar, ycar, zcar+drs,xpp,ypp,zpp,mp)
+                                      -grav_pot_car_ind(xcar, ycar, zcar-drs,xpp,ypp,zpp,mp))/(2.0*drs);
+            }
             f_x1 += f_xca*sinx2*cosx3+f_yca*sinx2*sinx3+f_zca*cosx2;
             f_x2 += f_xca*cosx2*cosx3+f_yca*cosx2*sinx3-f_zca*sinx2;
             f_x3 += f_xca*(-sinx3) + f_yca*cosx3;
@@ -3175,15 +1882,6 @@ void PlanetarySourceTerms(
   }
   if(tdamp>0.0) Damp(pmb,dt,prim,bcc,cons);
   if(NON_BAROTROPIC_EOS&&tcool>0.0) Cooling(pmb,dt,prim,bcc,cons);
-}
-
-/**
- * Convert a disk to a planet?
- * This function does nothing.
- */
-void PlanetarySystem::disktoplanet(double dt)
-{
-
 }
 
 //------------------------------------------
