@@ -1,0 +1,126 @@
+<comment>
+problem   = Kerlerian disk in spherical polar coordinates
+reference = 
+configure = --prob=disk --coord=spherical_polar
+
+<job>
+problem_id  = disk       # problem ID: basename of output filenames
+
+<output1>
+file_type   = vtk        # History data dump
+variable    = cons       #
+dt          = 6.28       # time increment between outputs
+
+<output2>
+file_type   = hdf5        # History data dump
+variable    = prim       #
+dt          = 6.28       # time increment between outputs
+
+<output3>
+file_type   = rst       # History data dump
+dt          = 62.8       # time increment between outputs
+
+<output4>
+file_type   = hst       # History data dump
+dt          = 0.06252       # time increment between outputs
+
+
+<time>
+cfl_number  = 0.333       # The Courant, Friedrichs, & Lewy (CFL) Number
+nlim        = -1        # cycle limit
+tlim        = 1e5     # time limit
+xorder      = 3
+
+<mesh>
+nx1         = 72       # Number of zones in X1-direction
+x1min       = 0.002      # minimum value of X1
+x1max       = 0.07       # maximum value of X1
+ix1_bc      = user         # Inner-X1 boundary condition flag
+ox1_bc      = user         # Outer-X1 boundary condition flag
+x1rat       = 1.0506
+
+nx2         = 56         # Number of zones in X2-direction
+x2min       = 0.2     # minimum value of X2
+x2max       = 2.94159265358979  # maximum value of X2
+ix2_bc      = reflecting       # Inner-X2 boundary condition flag
+ox2_bc      = reflecting       # Outer-X2 boundary condition flag
+
+nx3         = 128         # Number of zones in X3-direction
+x3min       = 0.0        # minimum value of X3
+x3max       = 6.28318530717958     # maximum value of X3
+ix3_bc      = periodic          # Inner-X3 boundary condition flag
+ox3_bc      = periodic          # Outer-X3 boundary condition flag
+
+refinement  = none 
+nuser_out_var = 27
+
+<refinement1>
+x1min       = 0.002
+x1max       = 0.07
+x2min       = 1.5608
+x2max       = 1.5808
+x3min       = 0.0
+x3max       = 6.28318530717958 
+level       = 1
+
+<meshblock>
+nx1=36
+nx2=28
+nx3=32
+
+<hydro>
+gamma           = 1.4        # gamma = C_p/C_v
+iso_sound_speed = 0.1        # isothermal sound speed
+dfloor          = 1.e-10
+pfloor          = 1.e-15
+
+<problem>
+coef_a    = 0.01       #
+
+GM              = 1.0e-3
+r0              = 1.0
+rho0            = 1.0    # intial uniform density
+rho_floor0      = 1.0e-5 # floor density
+slope_rho_floor = -2.25
+dflag           = 31       # initial density flag
+rexpcut         = 0.021
+vflag           = 22       # initial velocity flag
+tflag           = 2
+p0_over_r0      = 3.58e-6
+pslope          = -1.5
+tcool           = 1.e-10
+dslope          = -2.25
+ifield          = 7      # 3 uniform x field, 4 uniform x field with a jump at y=1
+beta            = 1.e3
+amp             = 0.
+ifov_flag       = 0
+pertmode        = 0
+diskinc         = -0.1713 
+amplitude       = 0.1745
+center          = 5.0
+width           = 1.0
+nu_iso           = 0.01
+hbc_ix1         = 4
+hbc_ox1         = 4
+mbc_ix1         = 2
+mbc_ox1         = 2
+
+
+<pointmass0>
+GM              = 1.0e-3
+x1_0            = 0.0
+x2_0            = 0.0
+x3_0            = 0.0
+v1_0            = 0.0
+v2_0            = 0.0
+v3_0            = 0.0
+
+<planets>
+np              = 1
+dtorbit         = 0.06252
+mass0           = 1.
+rsoft2          = 0.0036
+x0              = 1.0
+z0              = 0.
+vy0             = 1.0005
+fixorb          = 1
