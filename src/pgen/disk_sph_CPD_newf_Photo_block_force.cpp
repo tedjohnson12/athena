@@ -50,19 +50,18 @@
 //----------------------------------------
 // class for planetary system including mass, position, velocity
 
-class PlanetarySystem
+class BinarySystem
 {
 public:
-  int np;
-  double *mass;
-  double *xp, *yp, *zp;         // position in Cartesian coord.
-  double *vxp, *vyp, *vzp;      // velocity in Cartesian coord.
-  int *FeelOthers;
-  PlanetarySystem(int np);
-  ~PlanetarySystem();
+  double mass;
+  double xp, yp, zp;         // position in Cartesian coord.
+  double vxp, vyp, vzp;      // velocity in Cartesian coord.
+  int FeelOthers;
+  BinarySystem();
+  ~BinarySystem();
 private:
-  double *xpn, *ypn, *zpn;       // intermediate position for leap-frog integrator
-  double *vxpn, *vypn, *vzpn;
+  double xpn, ypn, zpn;       // intermediate position for leap-frog integrator
+  double vxpn, vypn, vzpn;
 public:
   void integrate(double dt);     // integrate planetary orbit
   void fixorbit(double dt);      // circular planetary orbit
@@ -76,49 +75,27 @@ public:
  * Initialize a planetary system with `np0` planets.
  * @param np0 Number of planets in the system.
  */
-PlanetarySystem::PlanetarySystem(int np0)
+BinarySystem::BinarySystem()
 {
-  np   = np0;
-  mass = new double[np];
-  xp   = new double[np];
-  yp   = new double[np];
-  zp   = new double[np];
-  vxp  = new double[np];
-  vyp  = new double[np];
-  vzp  = new double[np];
-  xpn  = new double[np];
-  ypn  = new double[np];
-  zpn  = new double[np];
-  vxpn = new double[np];
-  vypn = new double[np];
-  vzpn = new double[np];
-  FeelOthers=new int[np];
+  mass = 0.0;
+  xp   = 0.0;
+  yp   = 0.0;
+  zp   = 0.0;
+  vxp  = 0.0;
+  vyp  = 0.0;
+  vzp  = 0.0;
+  xpn  = 0.0;
+  ypn  = 0.0;
+  zpn  = 0.0;
+  vxpn = 0.0;
+  vypn = 0.0;
+  vzpn = 0.0;
+  FeelOthers=0;
 }
-
-//---------------------------------------------
-// destructor for planetary system
-
-PlanetarySystem::~PlanetarySystem()
-{
-  delete[] mass;
-  delete[] xp;
-  delete[] yp;
-  delete[] zp;
-  delete[] vxp;
-  delete[] vyp;
-  delete[] vzp;
-  delete[] xpn;
-  delete[] ypn;
-  delete[] zpn;
-  delete[] vxpn;
-  delete[] vypn;
-  delete[] vzpn;
-  delete[] FeelOthers;
-};
 
 // File scope global variables
 // initial condition
-static Real gm0=0.0, gms=0.0, gm1=0.0, r0 = 1.0, omegarot=0.0;
+static Real gmass_primary=0.0, gms=0.0, gm1=0.0, r0 = 1.0, omegarot=0.0;
 static int dflag, vflag, tflag, per;
 static Real rho0, rho_floor0, vy0, slope_rho_floor, mm, rrigid, origid, dfloor;
 static Real dslope, pslope, p0_over_r0, amp;
@@ -151,7 +128,7 @@ static Real lumx;
 static int ionization;
 // planetary system
 std::ofstream myfile; 
-static PlanetarySystem *psys;
+static BinarySystem *psys;
 static int fixorb;
 static int cylpot;
 static Real insert_start,insert_time;
@@ -281,8 +258,8 @@ void Mesh::InitUserMeshData(ParameterInput *pin)
   x1max=mesh_size.x1max;
 
   // Get parameters for gravitatonal potential of central point mass
-  gm0 = pin->GetOrAddReal("problem","GM",0.0);
-  gms=gm0;
+  gmass_primary = pin->GetOrAddReal("problem","GM",0.0);
+  gms=gmass_primary;
   r0 = pin->GetOrAddReal("problem","r0",1.0);
   omegarot = pin->GetOrAddReal("problem","omegarot",0.0);
 
@@ -430,40 +407,38 @@ void Mesh::InitUserMeshData(ParameterInput *pin)
   ind = pin->GetOrAddInteger("planets","ind",1);
   rsoft2 = pin->GetOrAddReal("planets","rsoft2",0.0);
   Real np = pin->GetOrAddInteger("planets","np",0);
-  psys = new PlanetarySystem(np);
+  psys = new BinarySystem();
   fixorb = pin->GetOrAddInteger("planets","fixorb",0);
   insert_start = pin->GetOrAddReal("planets","insert_start",0.0);
   insert_time = pin->GetOrAddReal("planets","insert_time",0.0);
   cylpot = pin->GetOrAddInteger("planets","cylpot",0);
 
   // for planetary orbit output
-  if(psys->np>0 && Globals::my_rank==0) myfile.open("orbit.txt",std::ios_base::app);
+  if(Globals::my_rank==0) myfile.open("orbit.txt",std::ios_base::app);
   dtorbit = pin->GetOrAddReal("planets","dtorbit",0.0);
 
   // set initial planet properties
-  for(int ip=0; ip<psys->np; ++ip){
-    char pname[10];
-    sprintf(pname,"mass%d",ip);
-    psys->mass[ip]=pin->GetOrAddReal("planets",pname,0.0);
-    sprintf(pname,"x%d",ip);
-    psys->xp[ip]=pin->GetOrAddReal("planets",pname,0.0);
-    sprintf(pname,"y%d",ip);
-    psys->yp[ip]=pin->GetOrAddReal("planets",pname,0.0);
-    sprintf(pname,"z%d",ip);
-    psys->zp[ip]=pin->GetOrAddReal("planets",pname,0.0);
-    sprintf(pname,"vx%d",ip);
-    psys->vxp[ip]=pin->GetOrAddReal("planets",pname,0.0);
-    sprintf(pname,"vy%d",ip);
-    psys->vyp[ip]=pin->GetOrAddReal("planets",pname,0.0);
-    sprintf(pname,"vz%d",ip);
-    psys->vzp[ip]=pin->GetOrAddReal("planets",pname,0.0);
-    sprintf(pname,"feel%d",ip);
-    psys->FeelOthers[ip]=pin->GetOrAddInteger("planets",pname,0);
-  }
-  if(psys->np>0){
-  gm1 = psys->mass[0];
+  char pname[10];
+  sprintf(pname,"mass%d",1);
+  psys->mass=pin->GetOrAddReal("planets",pname,0.0);
+  sprintf(pname,"x%d",1);
+  psys->xp=pin->GetOrAddReal("planets",pname,0.0);
+  sprintf(pname,"y%d",1);
+  psys->yp=pin->GetOrAddReal("planets",pname,0.0);
+  sprintf(pname,"z%d",1);
+  psys->zp=pin->GetOrAddReal("planets",pname,0.0);
+  sprintf(pname,"vx%d",1);
+  psys->vxp=pin->GetOrAddReal("planets",pname,0.0);
+  sprintf(pname,"vy%d",1);
+  psys->vyp=pin->GetOrAddReal("planets",pname,0.0);
+  sprintf(pname,"vz%d",1);
+  psys->vzp=pin->GetOrAddReal("planets",pname,0.0);
+  sprintf(pname,"feel%d",1);
+  psys->FeelOthers=pin->GetOrAddInteger("planets",pname,0);
+
+  gm1 = psys->mass;
   if(dflag==4) gms=gm1;
-  }
+
   // setup boundary condition
   if(mesh_bcs[BoundaryFace::inner_x1] == GetBoundaryFlag("user")) {
     EnrollUserBoundaryFunction(BoundaryFace::inner_x1, DiskInnerX1);
@@ -514,7 +489,7 @@ for(int k=ks; k<=ke; k++) {
     Real h = sqrt(poverrmid)/sqrt(gms/r/r/r);
     Real hcut = sqrt(poverrmid)/sqrt(gms/rcut/rcut/rcut);
 
-    w_K=sqrt(gm0/(r+TINY_NUMBER)/(r+TINY_NUMBER)/(r+TINY_NUMBER));
+    w_K=sqrt(gmass_primary/(r+TINY_NUMBER)/(r+TINY_NUMBER)/(r+TINY_NUMBER));
     v_A=bmag(k,j,i)/sqrt(rho);
 		if(tflag==13){
 		Real theta_trans=0.3;
@@ -1091,12 +1066,9 @@ void AlphaViscosity(HydroDiffusion *phdif, MeshBlock *pmb, const AthenaArray<Rea
       for (int j=js; j<=je; ++j) {
 #pragma simd
         for (int i=is; i<=ie; ++i){
-//	  Real r=pco->x1v(i);
-//          phdif->nu(ISO,k,j,i) = alpha*prim(IEN,k,j,i)/prim(IDN,k,j,i)/sqrt(gm0/r/r/r); 
-	  Real r=pco->x1v(i)*sin(pco->x2v(j));
-          // phdif->nu(ISO,k,j,i) = alpha*PoverR(pco->x1v(i),pco->x2v(j),pco->x3v(k))/sqrt(gm0/r/r/r);
-          phdif->nu(HydroDiffusion::DiffProcess::iso,k,j,i) = alpha*PoverR(pco->x1v(i),pco->x2v(j),pco->x3v(k))/sqrt(gm0/r/r/r);
-	}
+	        Real r=pco->x1v(i)*sin(pco->x2v(j));
+          phdif->nu(HydroDiffusion::DiffProcess::iso,k,j,i) = alpha*PoverR(pco->x1v(i),pco->x2v(j),pco->x3v(k))/sqrt(gmass_primary/r/r/r);
+	      }
       }
     }
   }
@@ -1613,7 +1585,7 @@ void Cooling(MeshBlock *pmb, const Real dt, const AthenaArray<Real> &prim,
 	        cons(IEN,k,j,i)=eint+0.5*(SQR(cons(IM1,k,j,i))+SQR(cons(IM2,k,j,i))
 				     +SQR(cons(IM3,k,j,i)))/cons(IDN,k,j,i);
          }
-        Real dtr = std::max(tcool*2.*PI/sqrt(gm0/r/r/r),dt);
+        Real dtr = std::max(tcool*2.*PI/sqrt(gmass_primary/r/r/r),dt);
         Real dfrac=dt/dtr;
         Real dE=eint-p_over_r/(gamma_gas-1.0)*cons(IDN,k,j,i);
         cons(IEN,k,j,i) -= dE*dfrac;
@@ -1650,7 +1622,7 @@ void Damp(MeshBlock *pmb, const Real dt, const AthenaArray<Real> &prim,
         if(x1 < rdi1){
                 ramp = (x1-rdi1)/(rdi1-xcut);
                 ramp = ramp*ramp;
-                tau = 2.0*PI*sqrt(r*r*r/gm0)*tdamp;
+                tau = 2.0*PI*sqrt(r*r*r/gmass_primary)*tdamp;
               }
               // desired quantities
         Real den, v1, v2, v3, m1, m2, m3, eint;
@@ -1739,7 +1711,7 @@ void DepleteCir(MeshBlock *pmb, const Real dt, const AthenaArray<Real> &prim, At
         Real xg = R*sin(th)*cos(phi);
         Real yg = R*sin(th)*sin(phi);
         Real zg = R*cos(th);
-        Real rdist = sqrt(SQR(xg-psys->xp[0])+SQR(yg-psys->yp[0])+SQR(zg-psys->zp[0]));
+        Real rdist = sqrt(SQR(xg-psys->xp)+SQR(yg-psys->yp)+SQR(zg-psys->zp));
         Real v1=0.0;
         Real v2=0.0;
         Real v3=0.0;
@@ -1781,105 +1753,96 @@ void PlanetarySourceTerms(
   Real src[NHYDRO];
   Coordinates *pco = pmb->pcoord;
   // integrate planet orbit
-  if (psys->np > 0) {
-    if(myfile.is_open()&&Globals::my_rank==0&&time>=timeout)
-    {
-      myfile<<time+dt<<' ';
-      for (int i=0; i<psys->np; ++i){
-        Real th=atan(psys->yp[i]/psys->xp[i]);
-        if(psys->xp[i]<0.0) th+=PI;
-        myfile<<psys->xp[i]<<' '<<psys->yp[i]<<' '<<psys->zp[i]
-        <<' '<<psys->vxp[i]<<' '<<psys->vyp[i]<<' '<<psys->vzp[i]<<' ';
-      }
-      myfile<<'\n'<<std::flush;
+  if(myfile.is_open()&&Globals::my_rank==0&&time>=timeout) {
+    myfile<<time+dt<<' ';
+    Real th=atan(psys->yp/psys->xp);
+    if(psys->xp<0.0) th+=PI;
+    myfile<<psys->xp<<' '<<psys->yp<<' '<<psys->zp
+    <<' '<<psys->vxp<<' '<<psys->vyp<<' '<<psys->vzp<<' ';
+    myfile<<'\n'<<std::flush;
 
-      timeout+=dtorbit;
-    }
-    for (int k=pmb->ks; k<=pmb->ke; ++k) {
-      Real x3=pco->x3v(k);
-      Real cosx3=cos(x3);
-      Real sinx3=sin(x3);
-      for (int j=pmb->js; j<=pmb->je; ++j) {
-        Real x2=pco->x2v(j);
-        Real cosx2=cos(x2);
-        Real sinx2=sin(x2);
-        for (int i=pmb->is; i<=pmb->ie; ++i) {
-          Real drs = pco->dx1v(i) / 10000.;
-          Real xcar = pco->x1v(i)*sinx2*cosx3;
-          Real ycar = pco->x1v(i)*sinx2*sinx3;
-          Real zcar = pco->x1v(i)*cosx2;
-          Real f_x1 = 0.0;
-          Real f_x2 = 0.0;
-          Real f_x3 = 0.0;
-          for (int ip=0; ip< psys->np; ++ip){
-            Real xpp=psys->xp[ip];
-            Real ypp=psys->yp[ip];
-            Real zpp=psys->zp[ip];
-            Real mp;
-  	        /* insert the planet at insert_start and gradually increase its mass during insert_time */
-            if(time<insert_start){
-              mp = 0.0;
-            }else{
-              mp = 1.0*std::min(1.0,((time-insert_start+1.e-10)/(insert_time+1.e-10)))*psys->mass[ip];
-            }
-            /* forces calculated using gradient of potential */
-            Real f_xca = -1.0* (grav_pot_car_btoa(xcar+drs, ycar, zcar,xpp,ypp,zpp,mp)
-  			        -grav_pot_car_btoa(xcar-drs, ycar, zcar,xpp,ypp,zpp,mp))/(2.0*drs);
-            Real f_yca = -1.0* (grav_pot_car_btoa(xcar, ycar+drs, zcar,xpp,ypp,zpp,mp)
-  	 		        -grav_pot_car_btoa(xcar, ycar-drs, zcar,xpp,ypp,zpp,mp))/(2.0*drs);
-            Real f_zca = -1.0* (grav_pot_car_btoa(xcar, ycar, zcar+drs,xpp,ypp,zpp,mp)
-			        -grav_pot_car_btoa(xcar, ycar, zcar-drs,xpp,ypp,zpp,mp))/(2.0*drs);
-            if(ind!=0){
-              f_xca += -1.0* (grav_pot_car_ind(xcar+drs, ycar, zcar,xpp,ypp,zpp,mp)
-                                      -grav_pot_car_ind(xcar-drs, ycar, zcar,xpp,ypp,zpp,mp))/(2.0*drs);
-              f_yca += -1.0* (grav_pot_car_ind(xcar, ycar+drs, zcar,xpp,ypp,zpp,mp)
-                                      -grav_pot_car_ind(xcar, ycar-drs, zcar,xpp,ypp,zpp,mp))/(2.0*drs);
-              f_zca += -1.0* (grav_pot_car_ind(xcar, ycar, zcar+drs,xpp,ypp,zpp,mp)
-                                      -grav_pot_car_ind(xcar, ycar, zcar-drs,xpp,ypp,zpp,mp))/(2.0*drs);
-            }
-            f_x1 += f_xca*sinx2*cosx3+f_yca*sinx2*sinx3+f_zca*cosx2;
-            f_x2 += f_xca*cosx2*cosx3+f_yca*cosx2*sinx3-f_zca*sinx2;
-            f_x3 += f_xca*(-sinx3) + f_yca*cosx3;
-//	    if(i==2&&j==17&&k==89) std::cout<<mp<<"fx1 "<<f_x1<<" fx2 "<<f_x2<<" fx3 "<<f_x3<<std::endl;
-          }
-          if(omegarot!=0.0) {
-            Real omegar=omegarot*cosx2;
-            Real omegat=-omegarot*sinx2;
-            /* centrifugal force */
-            Real f_xca = -1.0* (grav_pot_car_cen(xcar+drs, ycar, zcar)
- 			        -grav_pot_car_cen(xcar-drs, ycar, zcar))/(2.0*drs);
-            Real f_yca = -1.0* (grav_pot_car_cen(xcar, ycar+drs, zcar)
-			        -grav_pot_car_cen(xcar, ycar-drs, zcar))/(2.0*drs);
-            Real f_zca = -1.0* (grav_pot_car_cen(xcar, ycar, zcar+drs)
-			        -grav_pot_car_cen(xcar, ycar, zcar-drs))/(2.0*drs);
-            f_x1 += f_xca*sinx2*cosx3+f_yca*sinx2*sinx3+f_zca*cosx2;
-            f_x2 += f_xca*cosx2*cosx3+f_yca*cosx2*sinx3-f_zca*sinx2;
-            f_x3 += f_xca*(-sinx3) + f_yca*cosx3;
-            /* Coriolis force */
-            f_x1 -= 2.0*omegat*prim(IM3,k,j,i);
-            f_x2 += 2.0*omegar*prim(IM3,k,j,i);
-            f_x3 -= 2.0*omegar*prim(IM2,k,j,i)-2.0*omegat*prim(IM1,k,j,i);
-//	    if(i==2&&j==17&&k==89) std::cout<<" x "<<xcar<<" y "<<ycar<<" z "<<zcar<<"fx1 "<<f_x1<<" fx2 "<<f_x2<<" fx3 "<<f_x3<<" f_xca "<<f_xca<<" f_yca "<<f_yca<<" f_zca "<<f_zca<<" 2ox1 "<<2.0*omegat*prim(IM3,k,j,i)<<std::endl;
-          }
+    timeout+=dtorbit;
+  }
+  for (int k=pmb->ks; k<=pmb->ke; ++k) {
+    Real x3=pco->x3v(k);
+    Real cosx3=cos(x3);
+    Real sinx3=sin(x3);
+    for (int j=pmb->js; j<=pmb->je; ++j) {
+      Real x2=pco->x2v(j);
+      Real cosx2=cos(x2);
+      Real sinx2=sin(x2);
+      for (int i=pmb->is; i<=pmb->ie; ++i) {
+        Real drs = pco->dx1v(i) / 10000.;
+        Real xcar = pco->x1v(i)*sinx2*cosx3;
+        Real ycar = pco->x1v(i)*sinx2*sinx3;
+        Real zcar = pco->x1v(i)*cosx2;
+        Real f_x1 = 0.0;
+        Real f_x2 = 0.0;
+        Real f_x3 = 0.0;
+        Real xpp=psys->xp;
+        Real ypp=psys->yp;
+        Real zpp=psys->zp;
+        Real mp;
+        /* insert the planet at insert_start and gradually increase its mass during insert_time */
+        if(time<insert_start){
+          mp = 0.0;
+        }else{
+          mp = 1.0*std::min(1.0,((time-insert_start+1.e-10)/(insert_time+1.e-10)))*psys->mass;
+        }
+        /* forces calculated using gradient of potential */
+        Real f_xca = -1.0* (grav_pot_car_btoa(xcar+drs, ycar, zcar,xpp,ypp,zpp,mp)
+            -grav_pot_car_btoa(xcar-drs, ycar, zcar,xpp,ypp,zpp,mp))/(2.0*drs);
+        Real f_yca = -1.0* (grav_pot_car_btoa(xcar, ycar+drs, zcar,xpp,ypp,zpp,mp)
+            -grav_pot_car_btoa(xcar, ycar-drs, zcar,xpp,ypp,zpp,mp))/(2.0*drs);
+        Real f_zca = -1.0* (grav_pot_car_btoa(xcar, ycar, zcar+drs,xpp,ypp,zpp,mp)
+          -grav_pot_car_btoa(xcar, ycar, zcar-drs,xpp,ypp,zpp,mp))/(2.0*drs);
+        if(ind!=0){
+          f_xca += -1.0* (grav_pot_car_ind(xcar+drs, ycar, zcar,xpp,ypp,zpp,mp)
+                                  -grav_pot_car_ind(xcar-drs, ycar, zcar,xpp,ypp,zpp,mp))/(2.0*drs);
+          f_yca += -1.0* (grav_pot_car_ind(xcar, ycar+drs, zcar,xpp,ypp,zpp,mp)
+                                  -grav_pot_car_ind(xcar, ycar-drs, zcar,xpp,ypp,zpp,mp))/(2.0*drs);
+          f_zca += -1.0* (grav_pot_car_ind(xcar, ycar, zcar+drs,xpp,ypp,zpp,mp)
+                                  -grav_pot_car_ind(xcar, ycar, zcar-drs,xpp,ypp,zpp,mp))/(2.0*drs);
+        }
+        f_x1 += f_xca*sinx2*cosx3+f_yca*sinx2*sinx3+f_zca*cosx2;
+        f_x2 += f_xca*cosx2*cosx3+f_yca*cosx2*sinx3-f_zca*sinx2;
+        f_x3 += f_xca*(-sinx3) + f_yca*cosx3;
+        if(omegarot!=0.0) {
+          Real omegar=omegarot*cosx2;
+          Real omegat=-omegarot*sinx2;
+          /* centrifugal force */
+          Real f_xca = -1.0* (grav_pot_car_cen(xcar+drs, ycar, zcar)
+            -grav_pot_car_cen(xcar-drs, ycar, zcar))/(2.0*drs);
+          Real f_yca = -1.0* (grav_pot_car_cen(xcar, ycar+drs, zcar)
+            -grav_pot_car_cen(xcar, ycar-drs, zcar))/(2.0*drs);
+          Real f_zca = -1.0* (grav_pot_car_cen(xcar, ycar, zcar+drs)
+            -grav_pot_car_cen(xcar, ycar, zcar-drs))/(2.0*drs);
+          f_x1 += f_xca*sinx2*cosx3+f_yca*sinx2*sinx3+f_zca*cosx2;
+          f_x2 += f_xca*cosx2*cosx3+f_yca*cosx2*sinx3-f_zca*sinx2;
+          f_x3 += f_xca*(-sinx3) + f_yca*cosx3;
+          /* Coriolis force */
+          f_x1 -= 2.0*omegat*prim(IM3,k,j,i);
+          f_x2 += 2.0*omegar*prim(IM3,k,j,i);
+          f_x3 -= 2.0*omegar*prim(IM2,k,j,i)-2.0*omegat*prim(IM1,k,j,i);
+        }
 
-	        src[IM1] = dt*prim(IDN,k,j,i)*f_x1;
-          src[IM2] = dt*prim(IDN,k,j,i)*f_x2;
-          src[IM3] = dt*prim(IDN,k,j,i)*f_x3;
+        src[IM1] = dt*prim(IDN,k,j,i)*f_x1;
+        src[IM2] = dt*prim(IDN,k,j,i)*f_x2;
+        src[IM3] = dt*prim(IDN,k,j,i)*f_x3;
 
-          cons(IM1,k,j,i) += src[IM1];
-          cons(IM2,k,j,i) += src[IM2];
-          cons(IM3,k,j,i) += src[IM3];
+        cons(IM1,k,j,i) += src[IM1];
+        cons(IM2,k,j,i) += src[IM2];
+        cons(IM3,k,j,i) += src[IM3];
 
-          if(NON_BAROTROPIC_EOS) {
-            src[IEN] = src[IM1]*prim(IM1,k,j,i)+ src[IM2]*prim(IM2,k,j,i) 
-	               + src[IM3]*prim(IM3,k,j,i);
-            cons(IEN,k,j,i) += src[IEN];
-          }
+        if(NON_BAROTROPIC_EOS) {
+          src[IEN] = src[IM1]*prim(IM1,k,j,i)+ src[IM2]*prim(IM2,k,j,i) 
+                + src[IM3]*prim(IM3,k,j,i);
+          cons(IEN,k,j,i) += src[IEN];
         }
       }
     }
-    if(rcird>0.0) DepleteCir(pmb,dt,prim,cons); 
   }
+  if(rcird>0.0) DepleteCir(pmb,dt,prim,cons); 
   if(tdamp>0.0) Damp(pmb,dt,prim,bcc,cons);
   if(NON_BAROTROPIC_EOS&&tcool>0.0) Cooling(pmb,dt,prim,bcc,cons);
 }
@@ -1887,98 +1850,92 @@ void PlanetarySourceTerms(
 //------------------------------------------
 // f: circular planet orbit
 //
-void PlanetarySystem::fixorbit(double dt)
+void BinarySystem::fixorbit(double dt)
 {
-  int i;
-  for(i=0; i<np; ++i){
-    double dis=sqrt(xp[i]*xp[i]+yp[i]*yp[i]);
-    double ome=sqrt((gm0+mass[i])/dis/dis/dis);
-    double ang=acos(xp[i]/dis);
-    if(yp[i]<0.0) ang=2*PI-ang;
-    ang += ome*dt;
-    xp[i]=dis*cos(ang);
-    yp[i]=dis*sin(ang);
-  }
+  double dis=sqrt(xp*xp+yp*yp);
+  double ome=sqrt((gmass_primary+mass)/dis/dis/dis);
+  double ang=acos(xp/dis);
+  if(yp<0.0) ang=2*PI-ang;
+  ang += ome*dt;
+  xp=dis*cos(ang);
+  yp=dis*sin(ang);
   return;
 }
 
 //------------------------------------------
 //  f: planet position in the frame rotating at omegarot
 //
-void PlanetarySystem::Rotframe(double dt)
+void BinarySystem::Rotframe(double dt)
 {
-  int i;
-  for(i=0; i<np; ++i){
-    double dis=sqrt(xp[i]*xp[i]+yp[i]*yp[i]);
-    double ang=acos(xp[i]/dis);
-    if(yp[i]<0.0) ang=2*PI-ang;
-    ang -= omegarot*dt;
-    xp[i]=dis*cos(ang);
-    yp[i]=dis*sin(ang);
-  }
+  double dis=sqrt(xp*xp+yp*yp);
+  double ang=acos(xp/dis);
+  if(yp<0.0) ang=2*PI-ang;
+  ang -= omegarot*dt;
+  xp=dis*cos(ang);
+  yp=dis*sin(ang);
   return;
 }
 
 //----------------------------------------------------
 // f: planetary orbit integrator
 // 
-void PlanetarySystem::integrate(double dt)
-{
-  int i,j;
-  double forcex,forcey,forcez;
-  double forcexi=0., forceyi=0., forcezi=0.;
-  double *dist;
-  dist=new double[np];
-  for(i=0; i<np; ++i){
-    xpn[i]=xp[i]+vxp[i]*dt/2.;
-    ypn[i]=yp[i]+vyp[i]*dt/2.;
-    zpn[i]=zp[i]+vzp[i]*dt/2.;
-  }
-  for(i=0; i<np; ++i) dist[i]=sqrt(xpn[i]*xpn[i]+ypn[i]*ypn[i]+zpn[i]*zpn[i]);
-  // indirect term (acceleration of the central star) from the gravity of the planets themselves.
-  // will be added to direct force for each planet
-  for(j=0; j<np; ++j){
-    forcexi -= mass[j]/dist[j]/dist[j]/dist[j]*xpn[j];
-    forceyi -= mass[j]/dist[j]/dist[j]/dist[j]*ypn[j];
-    forcezi -= mass[j]/dist[j]/dist[j]/dist[j]*zpn[j];
-  }
-  for(i=0; i<np; ++i){
-    // direct term from the central star
-    forcex= -gm0/dist[i]/dist[i]/dist[i]*xpn[i];
-    forcey= -gm0/dist[i]/dist[i]/dist[i]*ypn[i];
-    forcez= -gm0/dist[i]/dist[i]/dist[i]*zpn[i];
-    forcex += forcexi;
-    forcey += forceyi;
-    forcez += forcezi;
-    // gravity from other planets
-    for(j=0; j<np; ++j){
-      if(j!=i){
-        double dis=(xpn[i]-xpn[j])*(xpn[i]-xpn[j])+(ypn[i]-ypn[j])*
-		   (ypn[i]-ypn[j])+(zpn[i]-zpn[j])*(zpn[i]-zpn[j]);
-        dis=sqrt(dis);
-        forcex += mass[j]/dis/dis/dis*(xpn[j]-xpn[i]);
-        forcey += mass[j]/dis/dis/dis*(ypn[j]-ypn[i]);
-        forcez += mass[j]/dis/dis/dis*(zpn[j]-zpn[i]);
-      }
-    }
-    vxpn[i] = vxp[i] + forcex*dt;
-    vypn[i] = vyp[i] + forcey*dt;
-    vzpn[i] = vzp[i] + forcez*dt;
-  }
-  for(i=0; i<np; ++i){
-    xpn[i]=xpn[i]+vxpn[i]*dt/2.;
-    ypn[i]=ypn[i]+vypn[i]*dt/2.;
-    zpn[i]=zpn[i]+vzpn[i]*dt/2.;
-  }
-  for(i=0; i<np; ++i){
-    xp[i]=xpn[i];
-    yp[i]=ypn[i];
-    zp[i]=zpn[i];
-    vxp[i]=vxpn[i];
-    vyp[i]=vypn[i];
-    vzp[i]=vzpn[i];
-  }
-  delete[] dist;
-  return;
-}
+// void BinarySystem::integrate(double dt)
+// {
+//   int i,j;
+//   double forcex,forcey,forcez;
+//   double forcexi=0., forceyi=0., forcezi=0.;
+//   double *dist;
+//   dist=new double[np];
+//   for(i=0; i<np; ++i){
+//     xpn[i]=xp[i]+vxp[i]*dt/2.;
+//     ypn[i]=yp[i]+vyp[i]*dt/2.;
+//     zpn[i]=zp[i]+vzp[i]*dt/2.;
+//   }
+//   for(i=0; i<np; ++i) dist[i]=sqrt(xpn[i]*xpn[i]+ypn[i]*ypn[i]+zpn[i]*zpn[i]);
+//   // indirect term (acceleration of the central star) from the gravity of the planets themselves.
+//   // will be added to direct force for each planet
+//   for(j=0; j<np; ++j){
+//     forcexi -= mass[j]/dist[j]/dist[j]/dist[j]*xpn[j];
+//     forceyi -= mass[j]/dist[j]/dist[j]/dist[j]*ypn[j];
+//     forcezi -= mass[j]/dist[j]/dist[j]/dist[j]*zpn[j];
+//   }
+//   for(i=0; i<np; ++i){
+//     // direct term from the central star
+//     forcex= -gmass_primary/dist[i]/dist[i]/dist[i]*xpn[i];
+//     forcey= -gmass_primary/dist[i]/dist[i]/dist[i]*ypn[i];
+//     forcez= -gmass_primary/dist[i]/dist[i]/dist[i]*zpn[i];
+//     forcex += forcexi;
+//     forcey += forceyi;
+//     forcez += forcezi;
+//     // gravity from other planets
+//     for(j=0; j<np; ++j){
+//       if(j!=i){
+//         double dis=(xpn[i]-xpn[j])*(xpn[i]-xpn[j])+(ypn[i]-ypn[j])*
+// 		   (ypn[i]-ypn[j])+(zpn[i]-zpn[j])*(zpn[i]-zpn[j]);
+//         dis=sqrt(dis);
+//         forcex += mass[j]/dis/dis/dis*(xpn[j]-xpn[i]);
+//         forcey += mass[j]/dis/dis/dis*(ypn[j]-ypn[i]);
+//         forcez += mass[j]/dis/dis/dis*(zpn[j]-zpn[i]);
+//       }
+//     }
+//     vxpn[i] = vxp[i] + forcex*dt;
+//     vypn[i] = vyp[i] + forcey*dt;
+//     vzpn[i] = vzp[i] + forcez*dt;
+//   }
+//   for(i=0; i<np; ++i){
+//     xpn[i]=xpn[i]+vxpn[i]*dt/2.;
+//     ypn[i]=ypn[i]+vypn[i]*dt/2.;
+//     zpn[i]=zpn[i]+vzpn[i]*dt/2.;
+//   }
+//   for(i=0; i<np; ++i){
+//     xp[i]=xpn[i];
+//     yp[i]=ypn[i];
+//     zp[i]=zpn[i];
+//     vxp[i]=vxpn[i];
+//     vyp[i]=vypn[i];
+//     vzp[i]=vzpn[i];
+//   }
+//   delete[] dist;
+//   return;
+// }
 
