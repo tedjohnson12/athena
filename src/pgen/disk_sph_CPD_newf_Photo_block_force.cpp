@@ -55,15 +55,15 @@ class BinarySystem
 public:
   double mass;
   double xp, yp, zp;         // position in Cartesian coord.
-  double vxp, vyp, vzp;      // velocity in Cartesian coord.
-  int FeelOthers;
+  // double vxp, vyp, vzp;      // velocity in Cartesian coord.
+  // int FeelOthers;
   BinarySystem();
   ~BinarySystem();
-private:
-  double xpn, ypn, zpn;       // intermediate position for leap-frog integrator
-  double vxpn, vypn, vzpn;
+// private:
+  // double xpn, ypn, zpn;       // intermediate position for leap-frog integrator
+  // double vxpn, vypn, vzpn;
 public:
-  void integrate(double dt);     // integrate planetary orbit
+  // void integrate(double dt);     // integrate planetary orbit
   void fixorbit(double dt);      // circular planetary orbit
   void Rotframe(double dt);      // for frame rotating at omegarot
 };
@@ -81,25 +81,25 @@ BinarySystem::BinarySystem()
   xp   = 0.0;
   yp   = 0.0;
   zp   = 0.0;
-  vxp  = 0.0;
-  vyp  = 0.0;
-  vzp  = 0.0;
-  xpn  = 0.0;
-  ypn  = 0.0;
-  zpn  = 0.0;
-  vxpn = 0.0;
-  vypn = 0.0;
-  vzpn = 0.0;
-  FeelOthers=0;
 }
 
 // File scope global variables
 // initial condition
-static Real gmass_primary=0.0, gms=0.0, gm1=0.0, r0 = 1.0, omegarot=0.0;
-static int dflag, vflag, tflag, per;
-static Real rho0, rho_floor0, vy0, slope_rho_floor, mm, rrigid, origid, dfloor;
+static Real gmass_primary=0.0;
+static Real gms=0.0;
+static Real gm1=0.0;
+// radius used to normalize density profile
+static Real r0 = 1.0;
+static Real omegarot=0.0;
+// 1: uniform,     2: step function,    31: disk structure with numerical integration assuming hydrostatic equilibrium
+// 3: normal disk structure with the anayltically derived hydrostatic equilibrium, tflag has to be 0
+// 4: CPD setup
+static int dflag;
+static int vflag, tflag, per;
+static Real rho0, rho_floor0, slope_rho_floor, mm, rrigid, origid, dfloor;
+// Only for vflag=1
+static Real vy0;
 static Real dslope, pslope, p0_over_r0, amp;
-static Real ifield,b0,beta;
 static Real rcut, rs;
 static Real firsttime;
 // readin table
@@ -154,9 +154,6 @@ AthenaArray<Real> x1area, x2area, x2area_p1, x3area, x3area_p1, vol;
 // Functions for initial condition
 static Real rho_floor(const Real x1, const Real x2, const Real x3);
 static Real rho_floorsf(const Real x1, const Real x2, const Real x3);
-static Real A3(const Real x1, const Real x2, const Real x3);
-static Real A2(const Real x1, const Real x2, const Real x3);
-static Real A1(const Real x1, const Real x2, const Real x3);
 static Real DenProfile(const Real x1, const Real x2, const Real x3);
 static Real DenProfilesf(const Real x1, const Real x2, const Real x3);
 static Real PoverR(const Real x1, const Real x2, const Real x3);
@@ -173,8 +170,23 @@ void ConvSphCar(const Real rad, const Real theta, const Real phi, Real &x, Real 
 void ConvVCarSph(const Real x, const Real y, const Real z, const Real vx, const Real vy, const Real vz, Real &vr, Real &vt, Real &vp);
 void ConvVSphCar(const Real rad, const Real theta, const Real phi, const Real vr, const Real vt, const Real vp, Real &vx, Real &vy, Real &vz);
 // Planet Potential
-// Real grav_pot_car_btoa(const Real xca, const Real yca, const Real zca,
-//         const Real xcb, const Real ycb, const Real zcb, const Real gb);
+Real grav_pot_car_btoa(const Real xca, const Real yca, const Real zca,
+        const Real xcb, const Real ycb, const Real zcb, const Real gb);
+
+/**
+ * Gravitational potential -- indirect term
+ * 
+ * @param xca x position of the fluid
+ * @param yca y position of the fluid
+ * @param zca z position of the fluid
+ * @param xpp x position of the star
+ * @param ypp y position of the star
+ * @param zpp z position of the star
+ * @param gmp G times stellar mass
+ * @returns Gravitational potential
+ * 
+ * P = GM/|R|^3 * r\cdot R
+ */
 Real grav_pot_car_ind(const Real xca, const Real yca, const Real zca,
         const Real xpp, const Real ypp, const Real zpp, const Real gmp);
 // Force on the planet
@@ -258,10 +270,10 @@ void Mesh::InitUserMeshData(ParameterInput *pin)
   x1max=mesh_size.x1max;
 
   // Get parameters for gravitatonal potential of central point mass
-  gmass_primary = pin->GetOrAddReal("problem","GM",0.0);
+  gmass_primary = pin->GetReal("problem","GM");
   gms=gmass_primary;
-  r0 = pin->GetOrAddReal("problem","r0",1.0);
-  omegarot = pin->GetOrAddReal("problem","omegarot",0.0);
+  r0 = pin->GetReal("problem","r0");
+  omegarot = pin->GetReal("problem","omegarot");
 
   // Get parameters for initial density and velocity
   rho0 = pin->GetReal("problem","rho0");
@@ -342,10 +354,10 @@ void Mesh::InitUserMeshData(ParameterInput *pin)
   ox2_bc = pin->GetOrAddString("mesh","ox2_bc","none");
 
   if(ix1_bc == "user") {
-    hbc_ix1 = pin->GetReal("problem","hbc_ix1");
+    hbc_ix1 = pin->GetInteger("problem","hbc_ix1");
   }
   if(ox1_bc == "user"){
-    hbc_ox1 = pin->GetReal("problem","hbc_ox1");
+    hbc_ox1 = pin->GetInteger("problem","hbc_ox1");
   }
   if(ix2_bc == "user") {
     hbc_ix2 = pin->GetReal("problem","hbc_ix2");
@@ -415,26 +427,37 @@ void Mesh::InitUserMeshData(ParameterInput *pin)
 
   // for planetary orbit output
   if(Globals::my_rank==0) myfile.open("orbit.txt",std::ios_base::app);
+  if (myfile.is_open()&&Globals::my_rank==0) {
+    myfile << "time " << "x y z ";
+    myfile << '\n' << std::flush;
+  }
   dtorbit = pin->GetOrAddReal("planets","dtorbit",0.0);
 
   // set initial planet properties
-  char pname[10];
-  sprintf(pname,"mass%d",1);
-  psys->mass=pin->GetOrAddReal("planets",pname,0.0);
-  sprintf(pname,"x%d",1);
-  psys->xp=pin->GetOrAddReal("planets",pname,0.0);
-  sprintf(pname,"y%d",1);
-  psys->yp=pin->GetOrAddReal("planets",pname,0.0);
-  sprintf(pname,"z%d",1);
-  psys->zp=pin->GetOrAddReal("planets",pname,0.0);
-  sprintf(pname,"vx%d",1);
-  psys->vxp=pin->GetOrAddReal("planets",pname,0.0);
-  sprintf(pname,"vy%d",1);
-  psys->vyp=pin->GetOrAddReal("planets",pname,0.0);
-  sprintf(pname,"vz%d",1);
-  psys->vzp=pin->GetOrAddReal("planets",pname,0.0);
-  sprintf(pname,"feel%d",1);
-  psys->FeelOthers=pin->GetOrAddInteger("planets",pname,0);
+  psys->mass = pin->GetOrAddReal("secondary", "mass", 0.0);
+  psys->xp = pin->GetOrAddReal("secondary", "x0",0.0);
+  psys->yp = pin->GetOrAddReal("secondary", "y0",1.0);
+  psys->zp = pin->GetOrAddReal("secondary", "z0",0.0);
+
+
+
+  // char pname[10];
+  // sprintf(pname,"mass%d",1);
+  // psys->mass=pin->GetOrAddReal("planets",pname,0.0);
+  // sprintf(pname,"x%d",1);
+  // psys->xp=pin->GetOrAddReal("planets",pname,0.0);
+  // sprintf(pname,"y%d",1);
+  // psys->yp=pin->GetOrAddReal("planets",pname,1.0);
+  // sprintf(pname,"z%d",1);
+  // psys->zp=pin->GetOrAddReal("planets",pname,0.0);
+  // sprintf(pname,"vx%d",1);
+  // psys->vxp=pin->GetOrAddReal("planets",pname,0.0);
+  // sprintf(pname,"vy%d",1);
+  // psys->vyp=pin->GetOrAddReal("planets",pname,0.0);
+  // sprintf(pname,"vz%d",1);
+  // psys->vzp=pin->GetOrAddReal("planets",pname,0.0);
+  // sprintf(pname,"feel%d",1);
+  // psys->FeelOthers=pin->GetOrAddInteger("planets",pname,0);
 
   gm1 = psys->mass;
   if(dflag==4) gms=gm1;
@@ -506,7 +529,7 @@ for(int k=ks; k<=ke; k++) {
       eta_A = v_A*v_A/w_K/Am;
     }
     else if (z>=4.0*h && z<5.0*h){
-	Am = 30.0/log(1.25)*log(z/(4.0*h+TINY_NUMBER))+1.0;
+	    Am = 30.0/log(1.25)*log(z/(4.0*h+TINY_NUMBER))+1.0;
       //eta_A = v_A*v_A/w_K/Am;
       //eta_A = v_A*v_A/w_K*exp(-1.0*(z-4.0*h)/0.5/h); 
     }
@@ -520,9 +543,9 @@ for(int k=ks; k<=ke; k++) {
     eta_A=v_A*v_A/w_K/Am;
     //eta_A=1e-30;
     if(0 && fabs(x1*cos(x2))<h){
-    std::cout<<"Am "<<Am<<" eta_A "<<eta_A<<" v_A "<<v_A<<" bmag "<<bmag(k,j,i)<<" rho "<<rho;
-    std::cout<<" P_B "<<bmag(k,j,i)*bmag(k,j,i)/2.0<<" P_g "<<rho*c_s*c_s<<" beta "<<2.0*(rho*c_s*c_s)/(bmag(k,j,i)*bmag(k,j,i))<<" w_K "<<w_K;
-    std::cout<<" z/h "<<fabs(x1*cos(x2))/h<<" r "<<x1<<std::endl;
+      std::cout<<"Am "<<Am<<" eta_A "<<eta_A<<" v_A "<<v_A<<" bmag "<<bmag(k,j,i)<<" rho "<<rho;
+      std::cout<<" P_B "<<bmag(k,j,i)*bmag(k,j,i)/2.0<<" P_g "<<rho*c_s*c_s<<" beta "<<2.0*(rho*c_s*c_s)/(bmag(k,j,i)*bmag(k,j,i))<<" w_K "<<w_K;
+      std::cout<<" z/h "<<fabs(x1*cos(x2))/h<<" r "<<x1<<std::endl;
     }
 
     Lambda=pow(10,2*z/(h+TINY_NUMBER))*1e-3*pow(rcut/2.,4);
@@ -570,7 +593,7 @@ void MeshBlock::ProblemGenerator(ParameterInput *pin)
   for(int k=ks; k<=ke; ++k) {
     for (int j=js; j<=je; ++j) {
       for (int i=is; i<=ie; ++i) {
-	phydro->u(IDN,k,j,i) = DenProfile(pcoord->x1v(i),pcoord->x2v(j),pcoord->x3v(k));
+	      phydro->u(IDN,k,j,i) = DenProfile(pcoord->x1v(i),pcoord->x2v(j),pcoord->x3v(k));
       }
     }
   }
@@ -580,11 +603,11 @@ void MeshBlock::ProblemGenerator(ParameterInput *pin)
   for(int k=ks; k<=ke; ++k) {
     for (int j=js; j<=je; ++j) {
       for (int i=is; i<=ie; ++i) {
-	if(per==0){
- 	  phydro->u(IDN,k,j,i) = std::max(phydro->u(IDN,k,j,i)*
+	      if(per==0){
+ 	        phydro->u(IDN,k,j,i) = std::max(phydro->u(IDN,k,j,i)*
 		               (1+amp*((double)rand()/(double)RAND_MAX-0.5)), 
 		               rho_floor(pcoord->x1v(i),pcoord->x2v(j),pcoord->x3v(k)));
-	}
+	      }
       }
     }
   }
@@ -697,7 +720,7 @@ static Real DenProfilesf(const Real x1, const Real x2, const Real x3)
 {  
   Real den;
   std::stringstream msg;
-  if (dflag == 1) {
+  if (dflag == 1) { // Const.
     den = rho0;
   } else if(dflag == 2) {
     Real y = x1*fabs(sin(x2))*sin(x3);
@@ -736,8 +759,12 @@ static Real DenProfilesf(const Real x1, const Real x2, const Real x3)
           <<"tflag has to be zero when dflag is 3" << std::endl;
       throw std::runtime_error(msg.str().c_str());
     }
-    Real r = std::max(fabs(x1*sin(x2)),xcut);
-    Real z = fabs(x1*cos(x2));
+    // next two coords are cylindrical
+    Real radius_sph = x1;
+    Real theta_bin = x2;
+    Real theta_disk = theta_bin - diskinc;
+    Real r = std::max(fabs(radius_sph*sin(theta_disk)),xcut);
+    Real z = fabs(radius_sph*cos(theta_disk));
     Real p_over_r = p0_over_r0;
     if (NON_BAROTROPIC_EOS) p_over_r = PoverRsf(x1, x2, x3);
     Real denmid = rho0*pow(r/r0,dslope);
@@ -992,25 +1019,24 @@ static void VelProfilesf(const Real x1, const Real x2, const Real x3,
     } else {
       if (NON_BAROTROPIC_EOS){
         if(vflag==2 || vflag==21){
-	  if(dflag!=3&&dflag!=4){
+	        if(dflag!=3&&dflag!=4){
             msg <<"### FATAL ERROR in Problem Generator"  << std::endl
             <<"dflag has to be 3 or 4 when vflag is 2 or 21" << std::endl;
             throw std::runtime_error(msg.str().c_str());
           }
- 	  Real p_over_r = PoverRsf(x1, x2, x3);
+ 	        Real p_over_r = PoverRsf(x1, x2, x3);
           vel = (dslope+pslope)*p_over_r/(gms/r) + (1.+pslope) - pslope*r/x1;
           vel = sqrt(gms/r)*sqrt(vel);
         }
         if(vflag==22){
           Real dx1=0.01*x1;
           Real dx2=PI*0.01;
-	  Real dpdR= (PoverRsf(x1+dx1, x2, x3)*DenProfilesf(x1+dx1, x2, x3)
+	        Real dpdR= (PoverRsf(x1+dx1, x2, x3)*DenProfilesf(x1+dx1, x2, x3)
                     -PoverRsf(x1-dx1, x2, x3)*DenProfilesf(x1-dx1, x2, x3))/2./dx1*sin(x2)+
-		   (PoverRsf(x1, x2+dx2, x3)*DenProfilesf(x1, x2+dx2, x3)
+		                (PoverRsf(x1, x2+dx2, x3)*DenProfilesf(x1, x2+dx2, x3)
                     -PoverRsf(x1, x2-dx2, x3)*DenProfilesf(x1, x2-dx2, x3))/2./dx2*cos(x2)/x1;
-	  vel = sqrt(std::max(gms*r*r/sqrt(r*r+z*z)/(r*r+z*z)
-		     +r/DenProfilesf(x1, x2, x3)*dpdR,0.0));
-          //std::cout<<"VelP"<<std::endl;
+	        vel = sqrt(std::max(gms*r*r/sqrt(r*r+z*z)/(r*r+z*z)
+		                +r/DenProfilesf(x1, x2, x3)*dpdR,0.0));
         }
       } else {
         vel = dslope*p0_over_r0/(gms/r)+1.0;
@@ -1019,7 +1045,7 @@ static void VelProfilesf(const Real x1, const Real x2, const Real x3,
     }
     if (vflag == 21) {
       if (x1 <= rrigid) {
-	vel=origid*fabs(x1*sin(x2));
+	      vel=origid*fabs(x1*sin(x2));
       }
     }
     v1 = 0.0;
@@ -1030,9 +1056,7 @@ static void VelProfilesf(const Real x1, const Real x2, const Real x3,
     v2 = 0.0;
     v3 = gms*x1*sin(x2);
   } 
-//  std::cout<<" v3b "<<v3;
   if(omegarot!=0.0) v3-=omegarot*fabs(x1*sin(x2));
-//  std::cout<<"omegarot "<<omegarot<<" x1 "<<x1<<" x2 "<<x2<<" x3 "<<x3<<" v3 "<<v3<<std::endl;
   return;
 }
 
@@ -1061,7 +1085,7 @@ void AlphaViscosity(HydroDiffusion *phdif, MeshBlock *pmb, const AthenaArray<Rea
 {
   Coordinates *pco = pmb->pcoord;
   if (alpha > 0.0) {
-    std::cout<<alpha<<std::endl;
+    // std::cout<<alpha<<std::endl;
     for (int k=ks; k<=ke; ++k) {
       for (int j=js; j<=je; ++j) {
 #pragma simd
@@ -1073,135 +1097,6 @@ void AlphaViscosity(HydroDiffusion *phdif, MeshBlock *pmb, const AthenaArray<Rea
     }
   }
   return;
-}
-
-
-//--------------------------------------------------------------------------------------
-//! \fn static Real A3(const Real x1,const Real x2,const Real x3)
-//  \brief A3: 3-component of vector potential
-/*
-   ifield  1:  constant B field parallel to z xaxis over Z direciton, constatnt over radius beyond rcut, smooth transition to 0 within rs
-           6:  constatn B field parallel to z xaxis over Z direction, plasma beta at the midplane is constant over radius
-	   7:  similar to 6, but the field becomes a constant over the radius within x1min to avoid the singularity
-           8:  dipole field
-   per     1:  perturbed along phi direction as |sin(phi)|
- * */
-static Real A3(const Real x1, const Real x2, const Real x3)
-{  
-  Real a3=0.0;
-  if(ifield==1) {
-    Real r = fabs(x1*sin(x2));
-    if(r>=rcut) {
-      a3 = r*b0/2.0;
-    }else if(r<=rs) {
-      a3 = 0.0;
-    }else{
-      Real a=rs/rcut;
-      Real adenom=(-1.+a)*(-1.+a)*(-1.+a);
-      Real b1=-3.*(1.+a*a)*b0/adenom;
-      Real b2=2.*(1.+a+a*a)*b0/adenom/(1.+a);
-      Real b3=(3.+a+a*a+a*a*a)*a*b0/adenom/(1.+a);
-      Real c=-a*a*a*b0*rcut*rcut/2./adenom/(1.+a);
-      a3 = b1/rcut*r*r/3.+b2/rcut/rcut*r*r*r/4.+b3*r/2.+c/r;
-    }    
-  }
-  if(ifield==6) {
-    Real dx2coarse=PI/nx2coarse;
-    Real r1 = x1*dx2coarse/2.;
-    Real r = fabs(x1*sin(x2))+1.e-6;
-    Real a=(pslope+dslope)/2.;
-    a3 = b0/pow(r0,a)*pow(r,a+1.)/(a+2.)+b0/pow(r0,a)*pow(r1,a+2.)/r*(1.-1./(a+2.));
-  }
-  if(ifield==7) {
-    Real r = fabs(x1*sin(x2));
-    Real a=(pslope+dslope)/2.;
-    if (r<=xcut){
-      a3 = r/2.0*b0*pow(xcut/r0,a);
-    }else{
-      a3 = b0/pow(r0,a)*pow(r,a+1.)/(a+2.)+b0*(pow(xcut,a+2)/pow(r0,a)*(1./2.-1./(a+2.)))/r;
-    }
-  }
-  if(ifield==8) {
-    Real r = fabs(x1*sin(x2));
-    a3 = mm*r/x1/x1/x1; 
-  }
-  if(per==1){
-    a3 = a3*fabs(sin(x3));
-  }
-  return(a3);
-}
-
-//--------------------------------------------------------------------------------------
-//! \fn static Real A2(const Real x1,const Real x2,const Real x3)
-/*  \brief A2: 2-component of vector potential
-    ifield:2  field loop with 1.e-6 amplitude
-    ifield:3  uniform field parallel to x xaxis
-    ifield:4  uniform field parallel to x xaxis, but when y<1.0, field become half
-*/
-static Real A2(const Real x1, const Real x2, const Real x3)
- { 
-  Real a2=0.0;
-  Real az=0.0;
-  if(ifield==2) {
-    Real x=x1*fabs(sin(x2))*cos(x3);
-    Real y=x1*fabs(sin(x2))*sin(x3);
-    if(x2<0.0||x2>PI){
-     x=-x;
-     y=-y;
-    }
-    Real z=x1*cos(x2);
-    if(sqrt(SQR(x-xc)+SQR(y-yc))<=0.5 && fabs(z-zc)<0.2){
-      az=1.0e-6*(0.5-sqrt(SQR(x-xc)+SQR(y-yc)));
-    }
-    a2=-az*fabs(sin(x2));
-  }else if(ifield==3){
-    Real y=x1*fabs(sin(x2))*sin(x3);
-    if(x2<0.0||x2>PI)y=-y;
-    a2=-b0*y*fabs(sin(x2));
-  }else if(ifield==4){
-    Real y=x1*fabs(sin(x2))*sin(x3);
-    if(x2<0.0||x2>PI)y=-y;
-    a2=-b0*y*fabs(sin(x2));
-    a2=a2*sin(y);
-  }
-  return(a2);
-}
-
-//--------------------------------------------------------------------------------------
-//! \fn static Real A1(const Real x1,const Real x2,const Real x3)
-//  \brief A1: 1-component of vector potential
-/*
-    ifield:2  field loop with 1.e-6 amplitude
-    ifield:3  uniform field parallel to x xaxis
-    ifield:4  uniform field parallel to x xaxis, but the amplitude is sin(y) 
-  */
-static Real A1(const Real x1, const Real x2, const Real x3)
-{
-  Real a1=0.0;
-  Real az=0.0;
-  if(ifield==2) {
-    Real x=x1*fabs(sin(x2))*cos(x3);
-    Real y=x1*fabs(sin(x2))*sin(x3);
-    if(x2<0.0||x2>PI){
-     x=-x;
-     y=-y;
-    }
-    Real z=x1*cos(x2);
-    if(sqrt(SQR(x-xc)+SQR(y-yc))<=0.5 && fabs(z-zc)<0.2){
-      az=1.e-6*(0.5-sqrt(SQR(x-xc)+SQR(y-yc)));
-    }
-    a1=az*cos(x2);
-  }else if(ifield==3) {
-    Real y=x1*fabs(sin(x2))*sin(x3);
-    if(x2<0.0||x2>PI)y=-y;
-    a1=b0*y*cos(x2);
-  }else if(ifield==4) {
-    Real y=x1*fabs(sin(x2))*sin(x3);
-    if(x2<0.0||x2>PI)y=-y;
-    a1=b0*y*cos(x2);
-    a1=a1*sin(y);
-  }
-  return(a1);
 }
 
 //------------------------------------------------------------
@@ -1683,6 +1578,20 @@ Real grav_pot_car_btoa(const Real xca, const Real yca, const Real zca,
   return(pot);
 }
 
+/**
+ * Gravitational potential -- indirect term
+ * 
+ * @param xca x position of the fluid
+ * @param yca y position of the fluid
+ * @param zca z position of the fluid
+ * @param xpp x position of the star
+ * @param ypp y position of the star
+ * @param zpp z position of the star
+ * @param gmp G times stellar mass
+ * @returns Gravitational potential
+ * 
+ * P = GM/|R|^3 * r\cdot R
+ */
 Real grav_pot_car_ind(const Real xca, const Real yca, const Real zca,
         const Real xpp, const Real ypp, const Real zpp, const Real gmp)
 {
@@ -1755,40 +1664,39 @@ void PlanetarySourceTerms(
   // integrate planet orbit
   if(myfile.is_open()&&Globals::my_rank==0&&time>=timeout) {
     myfile<<time+dt<<' ';
-    Real th=atan(psys->yp/psys->xp);
-    if(psys->xp<0.0) th+=PI;
-    myfile<<psys->xp<<' '<<psys->yp<<' '<<psys->zp
-    <<' '<<psys->vxp<<' '<<psys->vyp<<' '<<psys->vzp<<' ';
+    // Real th=atan(psys->yp/psys->xp);
+    // if(psys->xp<0.0) th+=PI;
+    myfile<<psys->xp<<' '<<psys->yp<<' '<<psys->zp<<' ';
+    // <<' '<<psys->vxp<<' '<<psys->vyp<<' '<<psys->vzp<<' ';
     myfile<<'\n'<<std::flush;
 
     timeout+=dtorbit;
   }
+  // x3 is theta
   for (int k=pmb->ks; k<=pmb->ke; ++k) {
     Real x3=pco->x3v(k);
     Real cosx3=cos(x3);
     Real sinx3=sin(x3);
+    // x2 is phi
     for (int j=pmb->js; j<=pmb->je; ++j) {
       Real x2=pco->x2v(j);
       Real cosx2=cos(x2);
       Real sinx2=sin(x2);
       for (int i=pmb->is; i<=pmb->ie; ++i) {
         Real drs = pco->dx1v(i) / 10000.;
+        // Position of fluid in cartesian coords
         Real xcar = pco->x1v(i)*sinx2*cosx3;
         Real ycar = pco->x1v(i)*sinx2*sinx3;
         Real zcar = pco->x1v(i)*cosx2;
+        // cartesian force components
         Real f_x1 = 0.0;
         Real f_x2 = 0.0;
         Real f_x3 = 0.0;
+        // cartesian coordinates of the secondary
         Real xpp=psys->xp;
         Real ypp=psys->yp;
         Real zpp=psys->zp;
-        Real mp;
-        /* insert the planet at insert_start and gradually increase its mass during insert_time */
-        if(time<insert_start){
-          mp = 0.0;
-        }else{
-          mp = 1.0*std::min(1.0,((time-insert_start+1.e-10)/(insert_time+1.e-10)))*psys->mass;
-        }
+        Real mp=psys->mass;        
         /* forces calculated using gradient of potential */
         Real f_xca = -1.0* (grav_pot_car_btoa(xcar+drs, ycar, zcar,xpp,ypp,zpp,mp)
             -grav_pot_car_btoa(xcar-drs, ycar, zcar,xpp,ypp,zpp,mp))/(2.0*drs);
@@ -1875,67 +1783,3 @@ void BinarySystem::Rotframe(double dt)
   yp=dis*sin(ang);
   return;
 }
-
-//----------------------------------------------------
-// f: planetary orbit integrator
-// 
-// void BinarySystem::integrate(double dt)
-// {
-//   int i,j;
-//   double forcex,forcey,forcez;
-//   double forcexi=0., forceyi=0., forcezi=0.;
-//   double *dist;
-//   dist=new double[np];
-//   for(i=0; i<np; ++i){
-//     xpn[i]=xp[i]+vxp[i]*dt/2.;
-//     ypn[i]=yp[i]+vyp[i]*dt/2.;
-//     zpn[i]=zp[i]+vzp[i]*dt/2.;
-//   }
-//   for(i=0; i<np; ++i) dist[i]=sqrt(xpn[i]*xpn[i]+ypn[i]*ypn[i]+zpn[i]*zpn[i]);
-//   // indirect term (acceleration of the central star) from the gravity of the planets themselves.
-//   // will be added to direct force for each planet
-//   for(j=0; j<np; ++j){
-//     forcexi -= mass[j]/dist[j]/dist[j]/dist[j]*xpn[j];
-//     forceyi -= mass[j]/dist[j]/dist[j]/dist[j]*ypn[j];
-//     forcezi -= mass[j]/dist[j]/dist[j]/dist[j]*zpn[j];
-//   }
-//   for(i=0; i<np; ++i){
-//     // direct term from the central star
-//     forcex= -gmass_primary/dist[i]/dist[i]/dist[i]*xpn[i];
-//     forcey= -gmass_primary/dist[i]/dist[i]/dist[i]*ypn[i];
-//     forcez= -gmass_primary/dist[i]/dist[i]/dist[i]*zpn[i];
-//     forcex += forcexi;
-//     forcey += forceyi;
-//     forcez += forcezi;
-//     // gravity from other planets
-//     for(j=0; j<np; ++j){
-//       if(j!=i){
-//         double dis=(xpn[i]-xpn[j])*(xpn[i]-xpn[j])+(ypn[i]-ypn[j])*
-// 		   (ypn[i]-ypn[j])+(zpn[i]-zpn[j])*(zpn[i]-zpn[j]);
-//         dis=sqrt(dis);
-//         forcex += mass[j]/dis/dis/dis*(xpn[j]-xpn[i]);
-//         forcey += mass[j]/dis/dis/dis*(ypn[j]-ypn[i]);
-//         forcez += mass[j]/dis/dis/dis*(zpn[j]-zpn[i]);
-//       }
-//     }
-//     vxpn[i] = vxp[i] + forcex*dt;
-//     vypn[i] = vyp[i] + forcey*dt;
-//     vzpn[i] = vzp[i] + forcez*dt;
-//   }
-//   for(i=0; i<np; ++i){
-//     xpn[i]=xpn[i]+vxpn[i]*dt/2.;
-//     ypn[i]=ypn[i]+vypn[i]*dt/2.;
-//     zpn[i]=zpn[i]+vzpn[i]*dt/2.;
-//   }
-//   for(i=0; i<np; ++i){
-//     xp[i]=xpn[i];
-//     yp[i]=ypn[i];
-//     zp[i]=zpn[i];
-//     vxp[i]=vxpn[i];
-//     vyp[i]=vypn[i];
-//     vzp[i]=vzpn[i];
-//   }
-//   delete[] dist;
-//   return;
-// }
-
