@@ -47,6 +47,117 @@
 #include "../field/field_diffusion/field_diffusion.hpp"
 #include "../hydro/hydro_diffusion/hydro_diffusion.hpp"
 
+
+
+//----------------------------------------
+// class to store vector info
+class Vec3D
+{
+public:
+  double x;
+  double y;
+  double z;
+  Vec3D(double x, double y, double z);
+  static Vec3D FromSph(double r, double theta, double phi);
+  Vec3D operator-(Vec3D);
+  Vec3D operator*(double);
+  double magnitude();
+};
+
+Vec3D::Vec3D(double x, double y, double z) {
+  this->x = x;
+  this->y = y;
+  this->z = z;
+}
+
+Vec3D Vec3D::operator-(Vec3D other) {
+  return Vec3D(
+    x - other.x,
+    y - other.y,
+    z - other.z
+  );
+} 
+
+Vec3D Vec3D::operator*(double k) {
+  return Vec3D(
+    x*k,
+    y*k,
+    z*k
+  );
+}
+
+// Vector magnitude
+double Vec3D::magnitude() {
+  return sqrt(
+    x*x + y*y + z*z
+  );
+}
+
+Vec3D Vec3D::FromSph(double r, double theta, double phi) {
+  return Vec3D(
+    r*sin(theta)*cos(phi),
+    r*sin(theta)*sin(phi),
+    r*cos(theta)
+  );
+}
+// Get the vector normal to the midplanet of the disk.
+// This assumes the disk with the highest z-value is on the y axis,
+// and the midplane intersects the z-axis.
+// In other words, the vector points to the second quadrant of the y-z plane.
+Vec3D get_nhat_tilt(double angle) {
+  return Vec3D(
+    0,
+    -1.0*sin(angle),
+    cos(angle)
+  );
+}
+
+// Dot product
+double dot(Vec3D v1, Vec3D v2) {
+  return v1.x*v2.x + v1.y*v2.y + v1.z*v2.z;
+}
+
+// Vector parallel to normal
+Vec3D r_parallel(Vec3D v, double angle) {
+  Vec3D nhat = get_nhat_tilt(angle);
+  return nhat * dot(v,nhat);
+}
+
+// Vector orthogonal to normal
+Vec3D r_perpendicular(Vec3D v, double angle) {
+  Vec3D r_par = r_parallel(v,angle);
+  return v - r_par;
+}
+
+// Get the height above the midplane of the inclined disk
+double get_z_above_midplane(Vec3D v, double angle) {
+  return r_parallel(v,angle).magnitude();
+}
+
+// Get the distance from the origin projected into the midplane
+double get_midplane_projection_distance(Vec3D v, double angle) {
+  return r_perpendicular(v, angle).magnitude();
+}
+
+// Vector defining phi=0 in the disk
+Vec3D get_ascending_node(double angle) {
+  return Vec3D(
+    0.0,
+    cos(angle),
+    sin(angle)
+  );
+}
+
+Vec3D cross(Vec3D v1, Vec3D v2) {
+  return Vec3D(
+    v1.y*v2.z - v1.z*v2.y,
+    v1.z*v2.x - v2.z*v1.z,
+    v1.x*v2.y - v2.x*v1.y
+  );
+}
+
+
+
 //----------------------------------------
 // class for planetary system including mass, position, velocity
 
@@ -95,7 +206,18 @@ static Real omegarot=0.0;
 // 3: normal disk structure with the anayltically derived hydrostatic equilibrium, tflag has to be 0
 // 4: CPD setup
 static int dflag;
-static int vflag, tflag, per;
+// 1: uniform in cartesion coordinate with vy0 along +y direction
+// 2: disk velocity with the analytically derived profile, dflag has to be 3 or 4
+// 21: similar to 2, but within rigid it is a solid body rotation, dflag has to be 3 or 4
+// 22: disk velocity derived by numericlally solving radial pressure gradient
+// 3: solid body rotation
+// 4: 2D Keplerian velocity
+static int vflag;
+// tflag   0:  radial power law, vertical isothermal
+// 1:  radial power law, vertical within h, T, beyond 4 h, 50*T, between power law
+//          dflag==4 CPD centered on the planet
+static int tflag;
+static int per;
 static Real rho0, rho_floor0, slope_rho_floor, mm, rrigid, origid, dfloor;
 // Only for vflag=1
 static Real vy0;
@@ -256,6 +378,17 @@ void DepleteCir(MeshBlock *pmb,const Real dt, const AthenaArray<Real> &prim,
 		AthenaArray<Real> &cons);
 void Cooling(MeshBlock *pmb, const Real dt, const AthenaArray<Real> &prim, 
 	     const AthenaArray<Real> &bcc, AthenaArray<Real> &cons);
+
+// Convert from binary-coplanar spherical coordinates to coordinates of the inclined
+// disk
+Real get_inclined_cyl_z(
+  Real r_bin, Real theta_bin, Real phi_bin, Real incl_disk
+) {
+    return (
+      (r_bin*cos(theta_bin) - r_bin*cos(phi_bin)*sin(theta_bin)*tan(incl_disk))
+      / cos(incl_disk)
+    );
+}
 
 //======================================================================================
 //! \fn void Mesh::InitUserMeshData(ParameterInput *pin)
@@ -439,26 +572,6 @@ void Mesh::InitUserMeshData(ParameterInput *pin)
   psys->yp = pin->GetOrAddReal("secondary", "y0",1.0);
   psys->zp = pin->GetOrAddReal("secondary", "z0",0.0);
 
-
-
-  // char pname[10];
-  // sprintf(pname,"mass%d",1);
-  // psys->mass=pin->GetOrAddReal("planets",pname,0.0);
-  // sprintf(pname,"x%d",1);
-  // psys->xp=pin->GetOrAddReal("planets",pname,0.0);
-  // sprintf(pname,"y%d",1);
-  // psys->yp=pin->GetOrAddReal("planets",pname,1.0);
-  // sprintf(pname,"z%d",1);
-  // psys->zp=pin->GetOrAddReal("planets",pname,0.0);
-  // sprintf(pname,"vx%d",1);
-  // psys->vxp=pin->GetOrAddReal("planets",pname,0.0);
-  // sprintf(pname,"vy%d",1);
-  // psys->vyp=pin->GetOrAddReal("planets",pname,0.0);
-  // sprintf(pname,"vz%d",1);
-  // psys->vzp=pin->GetOrAddReal("planets",pname,0.0);
-  // sprintf(pname,"feel%d",1);
-  // psys->FeelOthers=pin->GetOrAddInteger("planets",pname,0);
-
   gm1 = psys->mass;
   if(dflag==4) gms=gm1;
 
@@ -475,7 +588,6 @@ void Mesh::InitUserMeshData(ParameterInput *pin)
   if(mesh_bcs[BoundaryFace::outer_x2] == GetBoundaryFlag("user")) {
     EnrollUserBoundaryFunction(BoundaryFace::outer_x2, DiskOuterX2);
   }
-  //EnrollDiffusivityFunction(my_df); 
   // Enroll User Source terms
   
   EnrollUserExplicitSourceFunction(PlanetarySourceTerms);
@@ -488,76 +600,6 @@ void Mesh::InitUserMeshData(ParameterInput *pin)
   // EnrollUserHistoryOutput(1, PlanetForce, "fy");
   // EnrollUserHistoryOutput(2, PlanetForce, "fz");
 
-  return;
-}
-
-void my_df(FieldDiffusion *pfdif, MeshBlock *pmb, const AthenaArray<Real> &w,
-                      const AthenaArray<Real> &bmag, const int is, const int ie, const int js, const int je, const int ks, const int ke)
-{ 
-  double eta_A,Am,v_A,w_K,rho,c_s,eta_O,Lambda;
-  double x1,x2,x3;
-for(int k=ks; k<=ke; k++) {
-      for(int j=js; j<=je; j++) {
-        for(int i=is; i<=ie; i++) {
-    x1=pfdif->pmy_block->pcoord->x1v(i);
-    x2=pfdif->pmy_block->pcoord->x2v(j);
-    x3=pfdif->pmy_block->pcoord->x3v(k);
-    rho=pfdif->pmy_block->phydro->u(IDN,k,j,i); 
-    c_s=sqrt(PoverR(x1, x2, x3));
-    Real r = std::max(fabs(x1*sin(x2)),0.0);
-    Real rcut=std::max(fabs(x1*sin(x2)),xcut);
-    Real poverrmid = p0_over_r0*pow(r/r0, pslope);
-    //std::cout<<"P0/R0 "<<p0_over_r0<<" p/r_mid "<<poverrmid<<std::endl;
-    Real z = fabs(x1*cos(x2));
-    Real h = sqrt(poverrmid)/sqrt(gms/r/r/r);
-    Real hcut = sqrt(poverrmid)/sqrt(gms/rcut/rcut/rcut);
-
-    w_K=sqrt(gmass_primary/(r+TINY_NUMBER)/(r+TINY_NUMBER)/(r+TINY_NUMBER));
-    v_A=bmag(k,j,i)/sqrt(rho);
-		if(tflag==13){
-		Real theta_trans=0.3;
-		Real delta_theta = std::fabs(x2-0.5*M_PI);
-		Am=0.5/(0.5*(1.0-tanh(2.0*(delta_theta-theta_trans)/sqrt(poverrmid))));
-    }
-		else if(tflag==12 || tflag==14){
-    Real theta_trans=0.3;
-    Am=1.0/(0.5*(1.0-tanh(2.0*(z/h*0.1-theta_trans)/0.1)));
-    }
-		else{
-    if (z<4.0*h) {
-      Am = 1.0;
-      eta_A = v_A*v_A/w_K/Am;
-    }
-    else if (z>=4.0*h && z<5.0*h){
-	    Am = 30.0/log(1.25)*log(z/(4.0*h+TINY_NUMBER))+1.0;
-      //eta_A = v_A*v_A/w_K/Am;
-      //eta_A = v_A*v_A/w_K*exp(-1.0*(z-4.0*h)/0.5/h); 
-    }
-    else if (z>=5.0*h && z<8.0*h){
-        Am = 31.;
-    }
-    else Am = 31.0*exp(z/h-8.);
-
-    //else Am = 31.0;
-    }
-    eta_A=v_A*v_A/w_K/Am;
-    //eta_A=1e-30;
-    if(0 && fabs(x1*cos(x2))<h){
-      std::cout<<"Am "<<Am<<" eta_A "<<eta_A<<" v_A "<<v_A<<" bmag "<<bmag(k,j,i)<<" rho "<<rho;
-      std::cout<<" P_B "<<bmag(k,j,i)*bmag(k,j,i)/2.0<<" P_g "<<rho*c_s*c_s<<" beta "<<2.0*(rho*c_s*c_s)/(bmag(k,j,i)*bmag(k,j,i))<<" w_K "<<w_K;
-      std::cout<<" z/h "<<fabs(x1*cos(x2))/h<<" r "<<x1<<std::endl;
-    }
-
-    Lambda=pow(10,2*z/(h+TINY_NUMBER))*1e-3*pow(rcut/2.,4);
-    eta_O=v_A*v_A/w_K/Lambda;
-    // pfdif->etaB(I_A, k,j,i) = eta_A;
-    pfdif->etaB(FieldDiffusion::DiffProcess::ambipolar, k,j,i) = eta_A;
-    // pfdif->etaB(I_O, k,j,i) = eta_O;
-    pfdif->etaB(FieldDiffusion::DiffProcess::ohmic, k,j,i) = eta_O;
-
-  }
-}
-}
   return;
 }
 //======================================================================================
@@ -616,14 +658,14 @@ void MeshBlock::ProblemGenerator(ParameterInput *pin)
   for(int k=ks; k<=ke; ++k) {
     for (int j=js; j<=je; ++j) {
       for (int i=is; i<=ie; ++i) {
-	Real x1 = pcoord->x1v(i);
+	      Real x1 = pcoord->x1v(i);
         Real x2 = pcoord->x2v(j);
         Real x3 = pcoord->x3v(k);
         Real v1, v2, v3;
         VelProfile(x1, x2, x3, phydro->u(IDN,k,j,i), v1, v2, v3);
         phydro->u(IM1,k,j,i) = phydro->u(IDN,k,j,i)*v1;
-	phydro->u(IM2,k,j,i) = phydro->u(IDN,k,j,i)*v2;
- 	phydro->u(IM3,k,j,i) = phydro->u(IDN,k,j,i)*v3;
+	      phydro->u(IM2,k,j,i) = phydro->u(IDN,k,j,i)*v2;
+ 	      phydro->u(IM3,k,j,i) = phydro->u(IDN,k,j,i)*v3;
       }
     }
   }
@@ -640,11 +682,11 @@ void MeshBlock::ProblemGenerator(ParameterInput *pin)
           phydro->u(IEN,k,j,i) += 0.5*(SQR(phydro->u(IM1,k,j,i))+SQR(phydro->u(IM2,k,j,i))+
 				       SQR(phydro->u(IM3,k,j,i)))/phydro->u(IDN,k,j,i);
           // Initialize dust temperature
-	  if (ionization==1){
-	    Real rnocut = fabs(x1*sin(x2));
+          if (ionization==1){
+            Real rnocut = fabs(x1*sin(x2));
             Real z = fabs(x1*cos(x2));
-	    ruser_meshblock_data[4](k,j,i)=Interp(rnocut, z, nrtable, nztable, rtable, ztable, tdusttable)/TEUNIT;
-	  }
+            ruser_meshblock_data[4](k,j,i)=Interp(rnocut, z, nrtable, nztable, rtable, ztable, tdusttable)/TEUNIT;
+          }
         }
       }
     }
@@ -670,8 +712,9 @@ static Real rho_floor(const Real x1, const Real x2, const Real x3)
     ConvCarSph(xsf,ysf,zsf,rsphsf,thetasf,phisf);
     rhof=rho_floorsf(rsphsf,thetasf,phisf);
   }else{
-    Real x2h = asin(sqrt(sin2th(x1,x2,x3)));
-    rhof=rho_floorsf(x1,x2h,0.0); 
+    // Real x2h = asin(sqrt(sin2th(x1,x2,x3)));
+    // rhof=rho_floorsf(x1,x2h,0.0);
+    rhof=rho_floorsf(x1,x2,x3);
   }
   return rhof;
 }
@@ -679,16 +722,21 @@ static Real rho_floor(const Real x1, const Real x2, const Real x3)
 
 static Real rho_floorsf(const Real x1, const Real x2, const Real x3)
 {
-  Real r = fabs(x1*sin(x2));
-  Real zmod = std::max(fabs(x1*cos(x2)),xcut);
+  Vec3D v = Vec3D::FromSph(x1,x2,x3);
+  Real r = get_midplane_projection_distance(v,diskinc);
+  Real z = fabs(get_z_above_midplane(v,diskinc));
+  Real zmod = std::max(z,xcut);
   Real rhofloor=0.0;
   if (r<xcut) {
-    rhofloor=rho_floor0*pow(xcut/r0, slope_rho_floor);//*((x1min-r)/x1min*19.+1.);
-    if(x1<3.*xcut) rhofloor=rhofloor*(5.-(x1-xcut)/xcut*2.)*((xcut-r)/xcut*4.+1.);
+    // rhofloor=rho_floor0*pow(xcut/r0, slope_rho_floor);//*((x1min-r)/x1min*19.+1.);
+    rhofloor=rho_floor0 * pow(xcut/r0, slope_rho_floor);
+    // rhofloor = rho_floor0*pow(xcut/r0, slope_rho_floor)*exp(-1*(xcut-r)/sqrt(r*r + zmod*zmod));
+    
+    if(r<3.*xcut) rhofloor=rhofloor*(5.-(r-xcut)/xcut*2.)*((xcut-r)/xcut*4.+1.);
   }else{
     rhofloor=rho_floor0*pow(r/r0, slope_rho_floor);
   }
-  rhofloor=rhofloor/zmod/zmod*x1min/x1;
+  rhofloor=rhofloor/zmod/zmod*x1min/sqrt(z*z + r*r);
   return std::max(rhofloor,dfloor);
 }
 
@@ -710,8 +758,9 @@ static Real DenProfile(const Real x1, const Real x2, const Real x3)
     ConvCarSph(xsf,ysf,zsf,rsphsf,thetasf,phisf);
     den=DenProfilesf(rsphsf,thetasf,phisf);
   }else{
-    Real x2h = asin(sqrt(sin2th(x1,x2,x3)));
-    den=DenProfilesf(x1,x2h,0.0);
+    // Real x2h = asin(sqrt(sin2th(x1,x2,x3)));
+    // den=DenProfilesf(x1,x2h,0.0);
+    den=DenProfilesf(x1,x2,x3);
   }
   return den;
 }
@@ -722,15 +771,10 @@ static Real DenProfilesf(const Real x1, const Real x2, const Real x3)
   std::stringstream msg;
   if (dflag == 1) { // Const.
     den = rho0;
-  } else if(dflag == 2) {
-    Real y = x1*fabs(sin(x2))*sin(x3);
-    if (y<0.2*x1max)
-      den = 0.5*rho0;
-    else
-      den = rho0;
   } else if (dflag == 31) {
-    Real r = std::max(fabs(x1*sin(x2)),xcut);
-    Real z = fabs(x1*cos(x2));
+    Vec3D v = Vec3D::FromSph(x1,x2,x3);
+    Real r = get_midplane_projection_distance(v,diskinc);
+    Real z = fabs(get_z_above_midplane(v,diskinc));
     Real denmid = rho0*pow(r/r0,dslope);
     Real zo = 0.0;
     Real zn = zo;
@@ -759,34 +803,25 @@ static Real DenProfilesf(const Real x1, const Real x2, const Real x3)
           <<"tflag has to be zero when dflag is 3" << std::endl;
       throw std::runtime_error(msg.str().c_str());
     }
-    // next two coords are cylindrical
-    Real radius_sph = x1;
-    Real theta_bin = x2;
-    Real theta_disk = theta_bin - diskinc;
-    Real r = std::max(fabs(radius_sph*sin(theta_disk)),xcut);
-    Real z = fabs(radius_sph*cos(theta_disk));
+    Vec3D v = Vec3D::FromSph(x1,x2,x3);
+    // std::cout<<"v = ("<<v.x<<", "<<v.y<<", "<<v.z<<").\n";
+    Real r = get_midplane_projection_distance(v,diskinc);
+    Real z = fabs(get_z_above_midplane(v,diskinc));
+    // std::cout<<"The point (" << x1 <<", "<<x2<<", "<<x3<<") is at ("<<r<<", "<<z<<").\n";
     Real p_over_r = p0_over_r0;
     if (NON_BAROTROPIC_EOS) p_over_r = PoverRsf(x1, x2, x3);
-    Real denmid = rho0*pow(r/r0,dslope);
-    den = denmid*exp(gms/p_over_r*(1./sqrt(SQR(r)+SQR(z))-1./r));
-  } else if (dflag==4){ //CPD density
-    Real xsf,ysf,zsf,xpf,ypf,zpf,rcylsf,rcyld,den0;
-    ConvSphCar(x1, x2, x3, xsf, ysf, zsf);  
-    rcylsf=std::max(sqrt(xsf*xsf+ysf*ysf),xcut); 
-    rcyld=r0-rcylsf;
-    if(rcyld<-gapw) den0=(2.-exp((rcyld+gapw)/wtran))*(sh-sl)/2.+sl;
-    if(rcyld>-gapw&&rcyld<0.0) den0=exp((-rcyld-gapw)/wtran)*(sh-sl)/2.+sl;
-    if(rcyld<gapw&&rcyld>0.0)  den0=exp((rcyld-gapw)/wtran)*(sh-sl)/2.+sl;
-    if(rcyld>gapw)  den0=(2.-exp((gapw-rcyld)/wtran))*(sh-sl)/2.+sl;
-    Real p_over_r = p0_over_r0;
-    if (NON_BAROTROPIC_EOS) p_over_r = PoverRsf(x1, x2, x3);
-    Real denmid = den0*pow(rcylsf/r0,dslope);
-    den = denmid*exp(gms/p_over_r*(1./sqrt(SQR(rcylsf)+SQR(zsf))-1./rcylsf));
-  } else if (dflag==5){
-    Real r = fabs(x1*sin(x2));
-    Real z = fabs(x1*cos(x2));
-    den = Interp(r, z, nrtable, nztable, rtable, ztable, dentable);
-  }
+    Real denmid;
+    Real zfactor;
+    if (r > xcut) {
+      denmid = rho0*pow(r/r0,dslope);
+      zfactor = exp(gms/p_over_r*(1./sqrt(SQR(r)+SQR(z))-1./r));
+    }
+    else {
+      denmid = rho0*pow(xcut/r0,dslope);
+      zfactor = exp(gms/p_over_r*(1./sqrt(SQR(xcut)+SQR(z))-1./xcut));
+    } 
+    den = denmid*zfactor;
+  } 
   if (manualgap!=0){
     Real rcyld=fabs(x1*sin(x2))-r0;
     if(rcyld<-gapw) den=den*((2.-exp((rcyld+gapw)/wtran))*(sh-sl)/2.+sl);
@@ -843,8 +878,9 @@ static Real PoverR(const Real x1, const Real x2, const Real x3)
     ConvCarSph(xsf,ysf,zsf,rsphsf,thetasf,phisf);
     por=PoverRsf(rsphsf,thetasf,phisf);
   }else{
-    Real x2h = asin(sqrt(sin2th(x1,x2,x3)));
-    por=PoverRsf(x1,x2h,0.0);
+    // Real x2h = asin(sqrt(sin2th(x1,x2,x3)));
+    // por=PoverRsf(x1,x2h,0.0);
+    por=PoverRsf(x1,x2,x3);
   }
   return por;
 }
@@ -853,13 +889,13 @@ static Real PoverR(const Real x1, const Real x2, const Real x3)
 static Real PoverRsf(const Real x1, const Real x2, const Real x3)
 {  
   Real poverr;
+  Vec3D v = Vec3D::FromSph(x1,x2,x3);
+  Real r = get_midplane_projection_distance(v,diskinc);
+  Real z = fabs(get_z_above_midplane(v,diskinc));
   if (tflag == 0) {
-    Real r = std::max(fabs(x1*sin(x2)),xcut);
     poverr = p0_over_r0*pow(r/r0, pslope);
   } else if(tflag == 1){
-    Real r = std::max(fabs(x1*sin(x2)),xcut);
     Real poverrmid = p0_over_r0*pow(r/r0, pslope);
-    Real z = fabs(x1*cos(x2));
     Real h = sqrt(poverrmid)/sqrt(gms/r/r/r);
     if (z<h) {
       poverr=poverrmid;
@@ -869,9 +905,7 @@ static Real PoverRsf(const Real x1, const Real x2, const Real x3)
       poverr=poverrmid*pow(3.684,(z-h)/h);
     }
   } else if(tflag == 11){
-    Real r = std::max(fabs(x1*sin(x2)),xcut);
     Real poverrmid = p0_over_r0*pow(r/r0, pslope);
-    Real z = fabs(x1*cos(x2));
     Real h = sqrt(poverrmid)/sqrt(gms/r/r/r);
     if (z<h) {
       poverr=poverrmid;
@@ -881,9 +915,7 @@ static Real PoverRsf(const Real x1, const Real x2, const Real x3)
       poverr=(poverrmid+0.04*gms/r)/2+(0.04*gms/r-poverrmid)/2*sin((z/h-1.)/7*M_PI-M_PI/2.);
     }
   } else if(tflag == 12){
-    Real r = std::max(fabs(x1*sin(x2)),xcut);
     Real poverrmid = p0_over_r0*pow(r/r0, pslope);
-    Real z = fabs(x1*cos(x2));
     Real h = sqrt(poverrmid)/sqrt(gms/r/r/r);
 		Real pr_hot1 = 4.5*poverrmid;
 		Real pr_hot2 = 130.*poverrmid;
@@ -895,7 +927,6 @@ static Real PoverRsf(const Real x1, const Real x2, const Real x3)
       poverr=pr_hot1+(pr_hot2-pr_hot1)*tanh((z/h-7.)/10.);
     }
   } else if(tflag == 13){ // exactly the same as Bai & Stone 2017
-    Real r = std::max(fabs(x1*sin(x2)),xcut);
     Real poverrmid = p0_over_r0*pow(r/r0, pslope);
 		Real theta_trans=0.3;
     Real HoR0=sqrt(poverrmid);
@@ -907,7 +938,6 @@ static Real PoverRsf(const Real x1, const Real x2, const Real x3)
     gc = 1.0 + (HoRc-HoR0+(HoRp-HoRc)*std::max(delta_theta,0.0)/thetat)*0.5*(tanh(delta_theta/HoR0)+1.0)/HoR0;
 		poverr = gc*HoR0*gc*HoR0;
   } else if(tflag == 14){
-    Real r = std::max(fabs(x1*sin(x2)),xcut);
     Real poverrmid = p0_over_r0*pow(r/r0, pslope);
     Real HoR0=sqrt(p0_over_r0)*pow(r/r0,(pslope+1.)/2.);
     Real HoRc=0.4*pow(r/r0,(pslope+1.)/2.);
@@ -920,10 +950,8 @@ static Real PoverRsf(const Real x1, const Real x2, const Real x3)
     gc = 1.0 + (HoRc-HoR0+(HoRp-HoRc)*std::max(delta_theta,0.0)/thetat)*0.5*(tanh(delta_theta/atan(HoR0))+1.0)/HoR0;
 		poverr = gc*HoR0*gc*HoR0;
   } else if(tflag == 2){
-    poverr = p0_over_r0*pow(x1/r0, pslope); 
+    poverr = p0_over_r0*pow(r/r0, pslope); 
   } else if(tflag == 5){
-    Real r = fabs(x1*sin(x2));
-    Real z = fabs(x1*cos(x2));
     poverr = Interp(r, z, nrtable, nztable, rtable, ztable, portable);
 //    std::cout<<"por "<<poverr<<std::endl;
   }
@@ -950,13 +978,14 @@ static void VelProfile(const Real x1, const Real x2, const Real x3,
     ConvVSphCar(rsphsf, thetasf, phisf, vrsphsf, vthetasf, vphisf, vxsf, vysf, vzsf);
     ConvVCarSph(xpf, ypf, zpf, vxsf, vysf, vzsf, v1, v2, v3);
   }else{
-    Real sinx2h=sqrt(sin2th(x1,x2,x3));
-    Real x2h = asin(sinx2h);
-    Real v1s, v2s, v3s;
-    VelProfilesf(x1,x2h,x3,den,v1s,v2s,v3s);
-    v1 = v1s;
-    v2 = v3s*sin(pert(x1,x2,x3))*cos(x3)/(sinx2h+1.e-10);
-    v3 = v3s*(cos(pert(x1,x2,x3))*sin(x2) - sin(x3)*sin(pert(x1,x2,x3))*cos(x2))/(sinx2h+1.e-10);
+    // Real sinx2h=sqrt(sin2th(x1,x2,x3));
+    // Real x2h = asin(sinx2h);
+    // Real v1s, v2s, v3s;
+    // VelProfilesf(x1,x2h,x3,den,v1s,v2s,v3s);
+    // v1 = v1s;
+    // v2 = v3s*sin(pert(x1,x2,x3))*cos(x3)/(sinx2h+1.e-10);
+    // v3 = v3s*(cos(pert(x1,x2,x3))*sin(x2) - sin(x3)*sin(pert(x1,x2,x3))*cos(x2))/(sinx2h+1.e-10);
+    VelProfilesf(x1,x2,x3,den,v1,v2,v3);
   }
   return;
 }
@@ -1004,19 +1033,24 @@ void ConvVSphCar(const Real rad, const Real theta, const Real phi, const Real vr
 static void VelProfilesf(const Real x1, const Real x2, const Real x3, 
 		       const Real den, Real &v1, Real &v2, Real &v3)
 {  
+  Vec3D v = Vec3D::FromSph(x1,x2,x3);
+  Real r = get_midplane_projection_distance(v,diskinc);
+  Real z = fabs(get_z_above_midplane(v,diskinc));
   std::stringstream msg;
   if (vflag == 1) {
     v1 = vy0*sin(x2)*sin(x3);
     v2 = vy0*cos(x2)*sin(x3);
     v3 = vy0*cos(x3);
   } else if (vflag == 2 || vflag == 21 || vflag == 22) {       
-    Real r = std::max(fabs(x1*sin(x2)),xcut);
-    Real z = fabs(x1*cos(x2));
     Real vel;
     if (den <= (1.+amp)*rho_floorsf(x1, x2, x3)) {
-      vel = sqrt(gms*SQR(fabs(x1*sin(x2)))/(SQR(fabs(x1*sin(x2)))+SQR(z))
-		 /sqrt(SQR(fabs(x1*sin(x2)))+SQR(z)));
-    } else {
+      vel = sqrt(
+        gms*SQR(fabs(r))
+        /(SQR(fabs(r))+SQR(z))
+		    /sqrt(SQR(fabs(r))+SQR(z))
+      );
+    }
+    else {
       if (NON_BAROTROPIC_EOS){
         if(vflag==2 || vflag==21){
 	        if(dflag!=3&&dflag!=4){
@@ -1048,9 +1082,20 @@ static void VelProfilesf(const Real x1, const Real x2, const Real x3,
 	      vel=origid*fabs(x1*sin(x2));
       }
     }
-    v1 = 0.0;
-    v2 = 0.0;
-    v3 = vel;
+    Vec3D nhat = get_nhat_tilt(diskinc);
+    Vec3D r_perp = r_perpendicular(v,diskinc);
+    Vec3D vel_direction = cross(nhat, r_perp);
+    vel_direction = vel_direction * (1/vel_direction.magnitude());
+    double direction_x1 = vel_direction.x * sin(x2)*cos(x3) \
+                          + vel_direction.y * sin(x2)*sin(x3) \
+                          + vel_direction.z * cos(x2);
+    double direction_x2 = vel_direction.x * cos(x2)*cos(x3) \
+                          + vel_direction.y * cos(x2)*sin(x3) \
+                          - vel_direction.z * sin(x2);
+    double direction_x3 = vel_direction.x * -1.0 * sin(x3) + vel_direction.y * cos(x3);
+    v1 = direction_x1 * vel;
+    v2 = direction_x2 * vel;
+    v3 = direction_x3 * vel;
   } else if (vflag ==3) {
     v1 = 0.0;
     v2 = 0.0;
@@ -1060,8 +1105,15 @@ static void VelProfilesf(const Real x1, const Real x2, const Real x3,
   return;
 }
 
+
+// When there is no perturbation, this reduces to sin^2(theta)
 static Real sin2th(const Real x1, const Real x2, const Real x3){
-    return SQR(cos(x3))*SQR(sin(x2))+SQR(cos(pert(x1,x2,x3)))*SQR(sin(x3))*SQR(sin(x2))+SQR(sin(pert(x1,x2,x3)))*SQR(cos(x2)) - 2.0*cos(pert(x1,x2,x3))*sin(pert(x1,x2,x3))*cos(x2)*sin(x2)*sin(x3);
+    return (
+      SQR(cos(x3))*SQR(sin(x2))
+      +SQR(cos(pert(x1,x2,x3)))*SQR(sin(x3))*SQR(sin(x2))
+      +SQR(sin(pert(x1,x2,x3)))*SQR(cos(x2))
+      - 2.0*cos(pert(x1,x2,x3))*sin(pert(x1,x2,x3))*cos(x2)*sin(x2)*sin(x3)
+    );
 }
 
 static Real pert(const Real x1, const Real x2, const Real x3){
@@ -1221,11 +1273,11 @@ void DiodeInnerX1(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim, Fac
       for (int i=1; i<=(NGHOST); ++i) {
         prim(IDN,k,j,is-i) = prim(IDN,k,j,is);
 
-	Real v1, v2, v3;
+	      Real v1, v2, v3;
         Real x1 = pco->x1v(is-i);
         Real x2 = pco->x2v(j);
         Real x3 = pco->x3v(k);
-	VelProfile(x1, x2, x3, prim(IDN,k,j,is-i), v1, v2, v3);
+	      VelProfile(x1, x2, x3, prim(IDN,k,j,is-i), v1, v2, v3);
         prim(IM1,k,j,is-i) = std::min(prim(IM1,k,j,is), 0.0);
         prim(IM2,k,j,is-i) = 0.0;
         prim(IM3,k,j,is-i) = v3;
@@ -1366,18 +1418,18 @@ void StratInnerX2(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim, Fac
     for (int k=ks; k<=ke; ++k) {
       for (int j=1; j<=(NGHOST); ++j) {
         for (int i=is; i<=ie; ++i) {
-	  Real this_rho_floor = rho_floor(pco->x1v(i),pco->x2v(js),pco->x3v(k));
-	  Real tempa = prim(IEN,k,js,i) / prim(IDN,k,js,i);
+	        Real this_rho_floor = rho_floor(pco->x1v(i),pco->x2v(js),pco->x3v(k));
+	        Real tempa = prim(IEN,k,js,i) / prim(IDN,k,js,i);
           Real vpa = prim(IM3,k,js,i);
 
           prim(IDN,k,js-j,i) = prim(IDN,k,js,i)*pow(fabs(sin(pco->x2v(js-j))/sin(pco->x2v(js))),vpa*vpa/tempa);
           if (prim(IDN,k,js-j,i) < this_rho_floor) 
-	    prim(IDN,k,js-j,i) = this_rho_floor;
+	        prim(IDN,k,js-j,i) = this_rho_floor;
           prim(IM1,k,js-j,i) = 0.0;
           prim(IM2,k,js-j,i) = 0.0;
           prim(IM3,k,js-j,i) = prim(IM3,k,js,i);
           if(NON_BAROTROPIC_EOS) 
-	    prim(IEN,k,js-j,i) = tempa * prim(IDN,k,js-j,i);
+	        prim(IEN,k,js-j,i) = tempa * prim(IDN,k,js-j,i);
         }
       }
     }
@@ -1391,16 +1443,16 @@ void StratOuterX2(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim, Fac
       for (int j=1; j<=(NGHOST); ++j) {
         for (int i=is; i<=ie; ++i) {
           Real this_rho_floor = rho_floor(pco->x1v(i),pco->x2v(je),pco->x3v(k));
-	  Real tempa = prim(IEN,k,je,i) / prim(IDN,k,je,i);
+	        Real tempa = prim(IEN,k,je,i) / prim(IDN,k,je,i);
           Real vpa = prim(IM3,k,je,i);
           prim(IDN,k,je+j,i) = prim(IDN,k,je,i)*pow(fabs(sin(pco->x2v(je+j))/sin(pco->x2v(je))),vpa*vpa/tempa);
           if (prim(IDN,k,je+j,i) < this_rho_floor) 
-	    prim(IDN,k,je+j,i) = this_rho_floor;
+	        prim(IDN,k,je+j,i) = this_rho_floor;
           prim(IM1,k,je+j,i) = 0.0;
           prim(IM2,k,je+j,i) = 0.0;
           prim(IM3,k,je+j,i) = prim(IM3,k,je,i);
           if(NON_BAROTROPIC_EOS)
-	    prim(IEN,k,je+j,i) = tempa * prim(IDN,k,je+j,i);
+	        prim(IEN,k,je+j,i) = tempa * prim(IDN,k,je+j,i);
         }
       }
     }
@@ -1782,4 +1834,8 @@ void BinarySystem::Rotframe(double dt)
   xp=dis*cos(ang);
   yp=dis*sin(ang);
   return;
+}
+
+void MeshBlock::UserWorkInLoop() {
+  psys->fixorbit(pmy_mesh->dt);
 }
