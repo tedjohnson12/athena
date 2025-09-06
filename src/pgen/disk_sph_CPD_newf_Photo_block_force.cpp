@@ -196,9 +196,7 @@ BinarySystem::BinarySystem()
 
 // File scope global variables
 // initial condition
-static Real gmass_primary=0.0;
-static Real gms=0.0;
-static Real gm1=0.0;
+static Real gm_primary=0.0;
 // radius used to normalize density profile
 static Real r0 = 1.0;
 static Real omegarot=0.0;
@@ -217,11 +215,11 @@ static int vflag;
 // 1:  radial power law, vertical within h, T, beyond 4 h, 50*T, between power law
 //          dflag==4 CPD centered on the planet
 static int tflag;
-static int per;
-static Real rho0, rho_floor0, slope_rho_floor, mm, rrigid, origid, dfloor;
+static Real rho0, rho_floor0, slope_rho_floor, mm, dfloor;
+// Density profile cuts
+static Real rin, rout, fin, fout;
 // Only for vflag=1
-static Real vy0;
-static Real dslope, pslope, p0_over_r0, amp;
+static Real dslope, pslope, p0_over_r0;
 static Real rcut, rs;
 static Real firsttime;
 // readin table
@@ -232,7 +230,6 @@ static Real TUNIT, LUNIT, MUNIT, PUNIT, TEUNIT;
 // planet center CPD
 static Real sl, sh, wtran, gapw, rstart, rtrunc;
 // manually cut a gap
-static int manualgap;
 // boundary condition
 static std::string ix1_bc, ox1_bc, ix2_bc, ox2_bc;
 static int hbc_ix1, hbc_ox1, mbc_ix1, mbc_ox1;
@@ -241,25 +238,15 @@ static int hbc_ix2, hbc_ox2, mbc_ix2, mbc_ox2;
 static double gamma_gas;
 static Real tlow, thigh, tcool;
 // grid related
-static Real x1min, x1max, nx2coarse, xcut;
+static Real x1min, x1max, nx2coarse;
 
-static Real xc, yc, zc;
 static Real tdamp;
-// for x-ray ionization
-static Real lumx; 
-static int ionization;
 // planetary system
 std::ofstream myfile; 
 static BinarySystem *psys;
-static int fixorb;
-static int cylpot;
-static Real insert_start,insert_time;
-static Real rsoft2=0.0;
-static int ind;
 // planetary system: output
 static Real timeout=0.0,dtorbit;
 // planetary system: circumplanetary disk depletion
-static Real rcird, tcird, dcird,rocird;
 
 // disk inclination
 static Real pert(const Real x1, const Real x2, const Real x3);      // perturbation angle 
@@ -269,8 +256,6 @@ static Real pert_center, pert_width, pert_amp, pert_cut, diskinc;
 // Viscosity
 static Real alpha;
 
-// output quantities to ifov
-static int ifov_flag=0;
 AthenaArray<Real> x1area, x2area, x2area_p1, x3area, x3area_p1, vol;
 
 // Functions for initial condition
@@ -374,8 +359,7 @@ void PlanetarySourceTerms(
 );
 void Damp(MeshBlock *pmb, const Real dt, const AthenaArray<Real> &prim, 
 	  const AthenaArray<Real> &bcc, AthenaArray<Real> &cons);
-void DepleteCir(MeshBlock *pmb,const Real dt, const AthenaArray<Real> &prim, 
-		AthenaArray<Real> &cons);
+
 void Cooling(MeshBlock *pmb, const Real dt, const AthenaArray<Real> &prim, 
 	     const AthenaArray<Real> &bcc, AthenaArray<Real> &cons);
 
@@ -403,88 +387,50 @@ void Mesh::InitUserMeshData(ParameterInput *pin)
   x1max=mesh_size.x1max;
 
   // Get parameters for gravitatonal potential of central point mass
-  gmass_primary = pin->GetReal("problem","GM");
-  gms=gmass_primary;
+  gm_primary = pin->GetReal("problem","GM");
   r0 = pin->GetReal("problem","r0");
   omegarot = pin->GetReal("problem","omegarot");
 
   // Get parameters for initial density and velocity
   rho0 = pin->GetReal("problem","rho0");
   rho_floor0 = pin->GetReal("problem","rho_floor0"); 
-  slope_rho_floor = pin->GetOrAddReal("problem","slope_rho_floor",0.0);
+  slope_rho_floor = pin->GetReal("problem","slope_rho_floor");
   dflag = pin->GetInteger("problem","dflag");
   vflag = pin->GetInteger("problem","vflag");
-  rrigid = pin->GetOrAddReal("problem","rrigid",0.0);
-  origid = pin->GetOrAddReal("problem","origid",0.0);
-  vy0 = pin->GetOrAddReal("problem","vy0",0.0);
-  dslope = pin->GetOrAddReal("problem","dslope",0.0);
-  per = pin->GetOrAddInteger("problem","per",0);
-  amp = pin->GetOrAddReal("problem","amp",0.0);
+  dslope = pin->GetReal("problem","dslope");
 
   // Get viscosity
-  alpha = pin->GetOrAddReal("problem","nu_iso",0.0);
+  alpha = pin->GetReal("problem","nu_iso");
 
   // Get the maximum tilt angle
-  pert_mode = pin->GetOrAddInteger("problem","pertmode",0);
-  pert_amp = pin->GetOrAddReal("problem","amplitude",0.0);
-  pert_width = pin->GetOrAddReal("problem","width",r0/5.);
-  pert_center = pin->GetOrAddReal("problem", "center", r0);
-  pert_cut = pin->GetOrAddReal("problem", "pertcut", 0.0);
-  diskinc = pin->GetOrAddReal("problem","diskinc",0.0);
-
-  // CPD study or gap opening study
-  sl = pin->GetOrAddReal("problem","sl",1.);
-  sh = pin->GetOrAddReal("problem","sh",1.);
-  wtran = pin->GetOrAddReal("problem","wtran",1.);
-  gapw = pin->GetOrAddReal("problem","gapw",0.1);
-
-  manualgap = pin->GetOrAddInteger("problem","manualgap",0);
-
-  if(dflag==4){
-    rstart = pin->GetOrAddReal("problem","rstart",x1min);
-    rtrunc = pin->GetOrAddReal("problem","rtrunc",x1max);
-  }
+  diskinc = pin->GetReal("problem","diskinc");
 
   // Get parameters of initial pressure and cooling parameters
   if(NON_BAROTROPIC_EOS){
-    tflag = pin->GetOrAddInteger("problem","tflag",0);
-    p0_over_r0 = pin->GetOrAddReal("problem","p0_over_r0",0.0025);
-    pslope = pin->GetOrAddReal("problem","pslope",0.0);
-    tlow = pin->GetOrAddReal("problem","tlow",0.0);
-    thigh = pin->GetOrAddReal("problem","thigh",0.0);
-    tcool = pin->GetOrAddReal("problem","tcool",0.0);
+    tflag = pin->GetInteger("problem","tflag");
+    p0_over_r0 = pin->GetReal("problem","p0_over_r0");
+    pslope = pin->GetReal("problem","pslope");
+    tlow = pin->GetReal("problem","tlow");
+    thigh = pin->GetReal("problem","thigh");
+    tcool = pin->GetReal("problem","tcool");
     gamma_gas = pin->GetReal("hydro","gamma");
   }else{
     p0_over_r0=SQR(pin->GetReal("hydro","iso_sound_speed"));
   }
   dfloor=pin->GetOrAddReal("hydro","dfloor",(1024*(FLT_MIN))); 
-  xcut = pin->GetOrAddReal("problem","xcut",x1min);
+  rin = pin->GetReal("problem", "rin");
+  rout = pin->GetReal("problem", "rout");
+  fin = pin->GetReal("problem", "fin");
+  fout = pin->GetReal("problem", "fout"); 
 
   // damp quantities
-  tdamp = pin->GetOrAddReal("problem","tdamp",0.0);
-
-  // Get parameters for X-ray ionization
-  lumx = pin->GetOrAddReal("problem","lumx",2.0e30);
-  ionization = pin->GetOrAddInteger("problem","ionization",0);
-
-  // Get loop center for field loop tests;
-  xc = pin->GetOrAddReal("problem","xc",1.0);
-  yc = pin->GetOrAddReal("problem","yc",0.0);
-  zc = pin->GetOrAddReal("problem","zc",0.0);
-  
-
-  int nuser_out_var=pin->GetOrAddInteger("mesh","nuser_out_var",0);
-
-  // Get IFOV choice
-  if(nuser_out_var >=1){
-    ifov_flag = pin->GetInteger("problem","ifov_flag");
-  }
+  tdamp = pin->GetReal("problem","tdamp");
 
   // Get boundary condition flags
-  ix1_bc = pin->GetOrAddString("mesh","ix1_bc","none");
-  ox1_bc = pin->GetOrAddString("mesh","ox1_bc","none");
-  ix2_bc = pin->GetOrAddString("mesh","ix2_bc","none");
-  ox2_bc = pin->GetOrAddString("mesh","ox2_bc","none");
+  ix1_bc = pin->GetString("mesh","ix1_bc");
+  ox1_bc = pin->GetString("mesh","ox1_bc");
+  ix2_bc = pin->GetString("mesh","ix2_bc");
+  ox2_bc = pin->GetString("mesh","ox2_bc");
 
   if(ix1_bc == "user") {
     hbc_ix1 = pin->GetInteger("problem","hbc_ix1");
@@ -499,64 +445,8 @@ void Mesh::InitUserMeshData(ParameterInput *pin)
     hbc_ox2 = pin->GetReal("problem","hbc_ox2");
   }
 
-  // Get circumplanetary disk density depletion
-  rcird = pin->GetOrAddReal("problem","rcird",0.0);
-  rocird = pin->GetOrAddReal("problem","rocird",1.0e10);
-  tcird = pin->GetOrAddReal("problem","tcird",0.0);
-  dcird = pin->GetOrAddReal("problem","dcird",0.0);
-
-  //read in table if necessary
-  if(dflag==5 || tflag==5){
-    LUNIT=1.496e13;   // 1 AU
-    TUNIT=6003209.3; // 0.7 solar mass 1 AU velocity,  1 solar mass velocity 5022635.6  1 year/2pi
-    MUNIT=1.341914e30;  // 0.10271e15(number density at 1 AU)*LUNIT^3*2.35(mean weight)*1.66054e-24(mole mass)
-//    PUNIT=MUNIT/pow(LUNIT,4); // GM*MUNIT/LUNIT^4
-    PUNIT=MUNIT/LUNIT/TUNIT/TUNIT;
-    TEUNIT=PUNIT/8.3144598e7/(MUNIT/pow(LUNIT,3)); //Pcode/rhocode=Tcode/mu
-    Real tdust, tgas, den, pre;
-    nrtable = 96;
-    nztable = 1779;
-    rtable.NewAthenaArray(nrtable);
-    ztable.NewAthenaArray(nztable);
-    dentable.NewAthenaArray(nztable,nrtable);
-    portable.NewAthenaArray(nztable,nrtable);
-    tdusttable.NewAthenaArray(nztable,nrtable);
-    std::ifstream infile("./Original_data.out");
-    if (infile.is_open()){
-      for (int i = 0; i < nrtable; i++) {
-        for (int j = 0; j < nztable; j++) {
-	  infile >> rtable(i) >> ztable(j) >> tgas >> tdust >> den;
-	  rtable(i)=rtable(i)/LUNIT;
-          ztable(j)=ztable(j)/LUNIT;
-	  den=den*2.35*1.66054e-24; // in gram/cm^3
-	  dentable(j,i)=den/(MUNIT/pow(LUNIT,3)); // code unit
-	  portable(j,i) = tgas/TEUNIT/2.35; 
-	  tdusttable(j,i) = tdust;
-//	  std::cout<<rtable(i)<<' '<<ztable(j)<<' '<<portable(j,i)<<' '<<dentable(j,i)<<' '<<te<<' '<<den<<std::endl;
-        }
-      }
-    }else{
-      std::cout<<"Cannot open table input file"<<std::endl;
-    }
-    infile.close();
-  }
-/*
-  for (int i = 0; i < nrtable; i++) {
-    std::cout<<"r "<<rtable(i)<<std::endl;
-  }
-  for (int j = 0; j < nztable; j++) {
-    std::cout<<"z "<<ztable(j)<<std::endl;
-  }
-*/
   // open planetary system and set up variables
-  ind = pin->GetOrAddInteger("planets","ind",1);
-  rsoft2 = pin->GetOrAddReal("planets","rsoft2",0.0);
-  Real np = pin->GetOrAddInteger("planets","np",0);
   psys = new BinarySystem();
-  fixorb = pin->GetOrAddInteger("planets","fixorb",0);
-  insert_start = pin->GetOrAddReal("planets","insert_start",0.0);
-  insert_time = pin->GetOrAddReal("planets","insert_time",0.0);
-  cylpot = pin->GetOrAddInteger("planets","cylpot",0);
 
   // for planetary orbit output
   if(Globals::my_rank==0) myfile.open("orbit.txt",std::ios_base::app);
@@ -564,16 +454,13 @@ void Mesh::InitUserMeshData(ParameterInput *pin)
     myfile << "time " << "x y z ";
     myfile << '\n' << std::flush;
   }
-  dtorbit = pin->GetOrAddReal("planets","dtorbit",0.0);
+  dtorbit = pin->GetOrAddReal("planets","dtorbit",0.001);
 
   // set initial planet properties
-  psys->mass = pin->GetOrAddReal("secondary", "mass", 0.0);
-  psys->xp = pin->GetOrAddReal("secondary", "x0",0.0);
-  psys->yp = pin->GetOrAddReal("secondary", "y0",1.0);
-  psys->zp = pin->GetOrAddReal("secondary", "z0",0.0);
-
-  gm1 = psys->mass;
-  if(dflag==4) gms=gm1;
+  psys->mass = pin->GetReal("secondary", "mass");
+  psys->xp = pin->GetReal("secondary", "x0");
+  psys->yp = pin->GetReal("secondary", "y0");
+  psys->zp = pin->GetReal("secondary", "z0");
 
   // setup boundary condition
   if(mesh_bcs[BoundaryFace::inner_x1] == GetBoundaryFlag("user")) {
@@ -590,7 +477,7 @@ void Mesh::InitUserMeshData(ParameterInput *pin)
   }
   // Enroll User Source terms
   
-  EnrollUserExplicitSourceFunction(PlanetarySourceTerms);
+  // EnrollUserExplicitSourceFunction(PlanetarySourceTerms);
   // Enroll Viscosity
   if (alpha > 0.0) {
     EnrollViscosityCoefficient(AlphaViscosity);
@@ -608,15 +495,6 @@ void Mesh::InitUserMeshData(ParameterInput *pin)
 //======================================================================================
 void Mesh::UserWorkAfterLoop(ParameterInput *pin)
 {
-  if(ifov_flag==1 or ifov_flag==2){
-    x1area.DeleteAthenaArray();
-    x2area.DeleteAthenaArray();
-    x2area_p1.DeleteAthenaArray();
-    x3area.DeleteAthenaArray();
-    x3area_p1.DeleteAthenaArray();
-    vol.DeleteAthenaArray();
-  }
-
   return;
 }
 
@@ -632,7 +510,9 @@ void MeshBlock::ProblemGenerator(ParameterInput *pin)
   std::srand(gid);
 
   //  Initialize density
+  std::cout << "[Block" << gid << "] Initializing Density\n";
   for(int k=ks; k<=ke; ++k) {
+    std::cout << "[Block" << gid << ", DEN] Starting ix1=" << k << " of " << ke << "\n";
     for (int j=js; j<=je; ++j) {
       for (int i=is; i<=ie; ++i) {
 	      phydro->u(IDN,k,j,i) = DenProfile(pcoord->x1v(i),pcoord->x2v(j),pcoord->x3v(k));
@@ -640,22 +520,10 @@ void MeshBlock::ProblemGenerator(ParameterInput *pin)
     }
   }
 
-
-  // add density perturbation, needs to be after ifield 5 which assumes the disk is axisymmetric in the x3 direction so that divB=0.
-  for(int k=ks; k<=ke; ++k) {
-    for (int j=js; j<=je; ++j) {
-      for (int i=is; i<=ie; ++i) {
-	      if(per==0){
- 	        phydro->u(IDN,k,j,i) = std::max(phydro->u(IDN,k,j,i)*
-		               (1+amp*((double)rand()/(double)RAND_MAX-0.5)), 
-		               rho_floor(pcoord->x1v(i),pcoord->x2v(j),pcoord->x3v(k)));
-	      }
-      }
-    }
-  }
-
   //  Initialize velocity
+  std::cout << "[Block" << gid << "] Initializing Velocity\n";
   for(int k=ks; k<=ke; ++k) {
+    std::cout << "[Block" << gid << " VEL] Starting ix1=" << k << " of " << ke << '\n';
     for (int j=js; j<=je; ++j) {
       for (int i=is; i<=ie; ++i) {
 	      Real x1 = pcoord->x1v(i);
@@ -671,22 +539,17 @@ void MeshBlock::ProblemGenerator(ParameterInput *pin)
   }
   //  Initialize pressure
   if (NON_BAROTROPIC_EOS){
+    std::cout << "[Block" << gid << "] Initializing Pressure\n";
     for(int k=ks; k<=ke; ++k) {
+      std::cout << "[Block" << gid << " PRE] Starting ix1=" << k << " of " << ke << '\n';
       for (int j=js; j<=je; ++j) {
         for (int i=is; i<=ie; ++i) {
           Real x1 = pcoord->x1v(i);
           Real x2 = pcoord->x2v(j);
-          Real r = std::max(fabs(x1*sin(x2)),xcut);
           Real p_over_r = PoverR(x1, x2, pcoord->x3v(k)); 
           phydro->u(IEN,k,j,i) = p_over_r*phydro->u(IDN,k,j,i)/(gamma_gas - 1.0);
           phydro->u(IEN,k,j,i) += 0.5*(SQR(phydro->u(IM1,k,j,i))+SQR(phydro->u(IM2,k,j,i))+
 				       SQR(phydro->u(IM3,k,j,i)))/phydro->u(IDN,k,j,i);
-          // Initialize dust temperature
-          if (ionization==1){
-            Real rnocut = fabs(x1*sin(x2));
-            Real z = fabs(x1*cos(x2));
-            ruser_meshblock_data[4](k,j,i)=Interp(rnocut, z, nrtable, nztable, rtable, ztable, tdusttable)/TEUNIT;
-          }
         }
       }
     }
@@ -719,23 +582,39 @@ static Real rho_floor(const Real x1, const Real x2, const Real x3)
   return rhof;
 }
 
+Real midplane_density_cutoff_factor(
+  const Real r, const Real r_in, const Real r_out,
+  const Real slope_in, const Real slope_out
+) {
+  Real factor_in = powf(
+    exp(slope_in * (-1.0*r/r_in + 1.0)) + 1.0,
+    -1.0
+  );
+  Real factor_out = powf(
+    exp(slope_out * (r/r_out - 1.0)) + 1.0,
+    -1.0
+  );
+  return factor_in * factor_out;
+}
 
 static Real rho_floorsf(const Real x1, const Real x2, const Real x3)
 {
   Vec3D v = Vec3D::FromSph(x1,x2,x3);
   Real r = get_midplane_projection_distance(v,diskinc);
   Real z = fabs(get_z_above_midplane(v,diskinc));
-  Real zmod = std::max(z,xcut);
-  Real rhofloor=0.0;
-  if (r<xcut) {
-    // rhofloor=rho_floor0*pow(xcut/r0, slope_rho_floor);//*((x1min-r)/x1min*19.+1.);
-    rhofloor=rho_floor0 * pow(xcut/r0, slope_rho_floor);
-    // rhofloor = rho_floor0*pow(xcut/r0, slope_rho_floor)*exp(-1*(xcut-r)/sqrt(r*r + zmod*zmod));
+  Real zmod = std::max(z,rin);
+  Real rhofloor= rho_floor0 * pow(r/r0,slope_rho_floor) * midplane_density_cutoff_factor(
+    r,rin,rout,fin,fout
+  );
+  // if (r<rin) {
+  //   // rhofloor=rho_floor0*pow(rin/r0, slope_rho_floor);//*((x1min-r)/x1min*19.+1.);
+  //   rhofloor=rho_floor0 * pow(rin/r0, slope_rho_floor);
+  //   // rhofloor = rho_floor0*pow(rin/r0, slope_rho_floor)*exp(-1*(rin-r)/sqrt(r*r + zmod*zmod));
     
-    if(r<3.*xcut) rhofloor=rhofloor*(5.-(r-xcut)/xcut*2.)*((xcut-r)/xcut*4.+1.);
-  }else{
-    rhofloor=rho_floor0*pow(r/r0, slope_rho_floor);
-  }
+  //   if(r<3.*rin) rhofloor=rhofloor*(5.-(r-rin)/rin*2.)*((rin-r)/rin*4.+1.);
+  // }else{
+  //   rhofloor=rho_floor0*pow(r/r0, slope_rho_floor);
+  // }
   rhofloor=rhofloor/zmod/zmod*x1min/sqrt(z*z + r*r);
   return std::max(rhofloor,dfloor);
 }
@@ -765,6 +644,29 @@ static Real DenProfile(const Real x1, const Real x2, const Real x3)
   return den;
 }
 
+static Real DenProfileMod(
+  const Real g_m_primary,
+  const Real radius_midplane,
+  const Real alt_above_midplane,
+  const Real midplane_density_fiducial,
+  const Real radius_midplane_fiducial,
+  const Real _dslope,
+  const Real radius_inner_cutoff,
+  const Real radius_outer_cutoff,
+  const Real inner_cutoff_factor,
+  const Real outer_cutoff_factor,
+  const Real pressure_over_density
+) {
+  Real midplane_density = midplane_density_fiducial * pow(radius_midplane/radius_midplane_fiducial,_dslope)
+    * midplane_density_cutoff_factor(radius_midplane,radius_inner_cutoff,radius_outer_cutoff,inner_cutoff_factor,outer_cutoff_factor);
+  Real zfactor = exp(
+    g_m_primary/pressure_over_density*(
+      1./sqrt(SQR(radius_midplane)+SQR(alt_above_midplane))-1./radius_midplane
+    )
+  );
+  return midplane_density * zfactor;
+}
+
 static Real DenProfilesf(const Real x1, const Real x2, const Real x3)
 {  
   Real den;
@@ -775,19 +677,19 @@ static Real DenProfilesf(const Real x1, const Real x2, const Real x3)
     Vec3D v = Vec3D::FromSph(x1,x2,x3);
     Real r = get_midplane_projection_distance(v,diskinc);
     Real z = fabs(get_z_above_midplane(v,diskinc));
-    Real denmid = rho0*pow(r/r0,dslope);
+    Real denmid = rho0*pow(r/r0,dslope)*midplane_density_cutoff_factor(r,rin,rout,fin,fout);
     Real zo = 0.0;
     Real zn = zo;
     den=denmid;
     Real x1o,x2o,x3o,x1n,x2n,x3n,coe,h,dz,poverro,poverrn; 
     while (zn <= z){
-      coe = gms*0.5*(1./sqrt(r*r+zn*zn)-1./sqrt(r*r+zo*zo));
+      coe = gm_primary*0.5*(1./sqrt(r*r+zn*zn)-1./sqrt(r*r+zo*zo));
       x1o = sqrt(r*r+zo*zo);
       x2o = atan(r/zo);
       x3o = 0.0;
       poverro=PoverRsf(x1o,x2o,x3o);
       Real poverr_mid=p0_over_r0*pow(r/r0, pslope);
-      h = sqrt(poverr_mid)/sqrt(gms/r/r/r);
+      h = sqrt(poverr_mid)/sqrt(gm_primary/r/r/r);
       dz = h/32.;
       x1n = sqrt(r*r+zn*zn);
       x2n = atan(r/zn);
@@ -810,25 +712,21 @@ static Real DenProfilesf(const Real x1, const Real x2, const Real x3)
     // std::cout<<"The point (" << x1 <<", "<<x2<<", "<<x3<<") is at ("<<r<<", "<<z<<").\n";
     Real p_over_r = p0_over_r0;
     if (NON_BAROTROPIC_EOS) p_over_r = PoverRsf(x1, x2, x3);
-    Real denmid;
-    Real zfactor;
-    if (r > xcut) {
-      denmid = rho0*pow(r/r0,dslope);
-      zfactor = exp(gms/p_over_r*(1./sqrt(SQR(r)+SQR(z))-1./r));
-    }
-    else {
-      denmid = rho0*pow(xcut/r0,dslope);
-      zfactor = exp(gms/p_over_r*(1./sqrt(SQR(xcut)+SQR(z))-1./xcut));
-    } 
-    den = denmid*zfactor;
+    // Real denmid;
+    // Real zfactor;
+    den = DenProfileMod(
+      gm_primary,r,z,rho0,r0,dslope,rin,rout,fin,fout,p_over_r
+    );
+    // if (r > rin) {
+    //   denmid = rho0*pow(r/r0,dslope);
+    //   zfactor = exp(gm_primary/p_over_r*(1./sqrt(SQR(r)+SQR(z))-1./r));
+    // }
+    // else {
+    //   denmid = rho0*pow(rin/r0,dslope);
+    //   zfactor = exp(gm_primary/p_over_r*(1./sqrt(SQR(rin)+SQR(z))-1./rin));
+    // } 
+    // den = denmid*zfactor;
   } 
-  if (manualgap!=0){
-    Real rcyld=fabs(x1*sin(x2))-r0;
-    if(rcyld<-gapw) den=den*((2.-exp((rcyld+gapw)/wtran))*(sh-sl)/2.+sl);
-    if(rcyld>-gapw&&rcyld<0.0) den=den*(exp((-rcyld-gapw)/wtran)*(sh-sl)/2.+sl);
-    if(rcyld<gapw&&rcyld>0.0)  den=den*(exp((rcyld-gapw)/wtran)*(sh-sl)/2.+sl);
-    if(rcyld>gapw)  den=den*((2.-exp((gapw-rcyld)/wtran))*(sh-sl)/2.+sl);
-  }
   return(std::max(den,rho_floorsf(x1, x2, x3)));
 }
 
@@ -885,6 +783,21 @@ static Real PoverR(const Real x1, const Real x2, const Real x3)
   return por;
 }
 
+static Real PoverR_vertical_isothermal(
+  const Real midplane_radius,
+  const Real midplane_inner_edge_radius,
+  const Real p_over_rho_fiducial,
+  const Real midplane_radius_fiducial,
+  const Real _pslope
+) {
+  if (midplane_radius < midplane_inner_edge_radius) {
+    return p_over_rho_fiducial * pow(midplane_inner_edge_radius/midplane_radius_fiducial,_pslope);
+  }
+  else {
+    return p_over_rho_fiducial * pow(midplane_radius/midplane_radius_fiducial,_pslope);
+  }
+}
+
 
 static Real PoverRsf(const Real x1, const Real x2, const Real x3)
 {  
@@ -893,10 +806,12 @@ static Real PoverRsf(const Real x1, const Real x2, const Real x3)
   Real r = get_midplane_projection_distance(v,diskinc);
   Real z = fabs(get_z_above_midplane(v,diskinc));
   if (tflag == 0) {
-    poverr = p0_over_r0*pow(r/r0, pslope);
+    poverr = PoverR_vertical_isothermal(
+      r,rin,p0_over_r0,r0,pslope
+    );
   } else if(tflag == 1){
     Real poverrmid = p0_over_r0*pow(r/r0, pslope);
-    Real h = sqrt(poverrmid)/sqrt(gms/r/r/r);
+    Real h = sqrt(poverrmid)/sqrt(gm_primary/r/r/r);
     if (z<h) {
       poverr=poverrmid;
     } else if (z>4*h){
@@ -906,17 +821,17 @@ static Real PoverRsf(const Real x1, const Real x2, const Real x3)
     }
   } else if(tflag == 11){
     Real poverrmid = p0_over_r0*pow(r/r0, pslope);
-    Real h = sqrt(poverrmid)/sqrt(gms/r/r/r);
+    Real h = sqrt(poverrmid)/sqrt(gm_primary/r/r/r);
     if (z<h) {
       poverr=poverrmid;
     } else if (z>8*h){
-      poverr=0.04*gms/r;
+      poverr=0.04*gm_primary/r;
     } else {
-      poverr=(poverrmid+0.04*gms/r)/2+(0.04*gms/r-poverrmid)/2*sin((z/h-1.)/7*M_PI-M_PI/2.);
+      poverr=(poverrmid+0.04*gm_primary/r)/2+(0.04*gm_primary/r-poverrmid)/2*sin((z/h-1.)/7*M_PI-M_PI/2.);
     }
   } else if(tflag == 12){
     Real poverrmid = p0_over_r0*pow(r/r0, pslope);
-    Real h = sqrt(poverrmid)/sqrt(gms/r/r/r);
+    Real h = sqrt(poverrmid)/sqrt(gm_primary/r/r/r);
 		Real pr_hot1 = 4.5*poverrmid;
 		Real pr_hot2 = 130.*poverrmid;
     if (z<1.5*h) {
@@ -1021,6 +936,10 @@ void ConvVSphCar(const Real rad, const Real theta, const Real phi, const Real vr
 }
 
 
+static Real Pressure(const Real x1, const Real x2, const Real x3) {
+  return PoverRsf(x1, x2, x3)*DenProfilesf(x1, x2, x3);
+}
+
 //------------------------------------------------------------------------------------
 //! \f velocity profile
 // vflag  1: uniform in cartesion coordinate with vy0 along +y direction
@@ -1036,21 +955,18 @@ static void VelProfilesf(const Real x1, const Real x2, const Real x3,
   Vec3D v = Vec3D::FromSph(x1,x2,x3);
   Real r = get_midplane_projection_distance(v,diskinc);
   Real z = fabs(get_z_above_midplane(v,diskinc));
+  Real angle_above_midplane = atan2(z,r);
   std::stringstream msg;
-  if (vflag == 1) {
-    v1 = vy0*sin(x2)*sin(x3);
-    v2 = vy0*cos(x2)*sin(x3);
-    v3 = vy0*cos(x3);
-  } else if (vflag == 2 || vflag == 21 || vflag == 22) {       
+  if (vflag == 2 || vflag == 21 || vflag == 22) {       
     Real vel;
-    if (den <= (1.+amp)*rho_floorsf(x1, x2, x3)) {
+    if (den <= rho_floorsf(x1, x2, x3)) { // probably not
       vel = sqrt(
-        gms*SQR(fabs(r))
+        gm_primary*SQR(fabs(r))
         /(SQR(fabs(r))+SQR(z))
 		    /sqrt(SQR(fabs(r))+SQR(z))
       );
     }
-    else {
+    else { // yes
       if (NON_BAROTROPIC_EOS){
         if(vflag==2 || vflag==21){
 	        if(dflag!=3&&dflag!=4){
@@ -1059,27 +975,48 @@ static void VelProfilesf(const Real x1, const Real x2, const Real x3,
             throw std::runtime_error(msg.str().c_str());
           }
  	        Real p_over_r = PoverRsf(x1, x2, x3);
-          vel = (dslope+pslope)*p_over_r/(gms/r) + (1.+pslope) - pslope*r/x1;
-          vel = sqrt(gms/r)*sqrt(vel);
+          vel = (dslope+pslope)*p_over_r/(gm_primary/r) + (1.+pslope) - pslope*r/x1;
+          vel = sqrt(gm_primary/r)*sqrt(vel);
         }
-        if(vflag==22){
+        if(vflag==22){ // yes
           Real dx1=0.01*x1;
           Real dx2=PI*0.01;
-	        Real dpdR= (PoverRsf(x1+dx1, x2, x3)*DenProfilesf(x1+dx1, x2, x3)
-                    -PoverRsf(x1-dx1, x2, x3)*DenProfilesf(x1-dx1, x2, x3))/2./dx1*sin(x2)+
-		                (PoverRsf(x1, x2+dx2, x3)*DenProfilesf(x1, x2+dx2, x3)
-                    -PoverRsf(x1, x2-dx2, x3)*DenProfilesf(x1, x2-dx2, x3))/2./dx2*cos(x2)/x1;
-	        vel = sqrt(std::max(gms*r*r/sqrt(r*r+z*z)/(r*r+z*z)
-		                +r/DenProfilesf(x1, x2, x3)*dpdR,0.0));
+          Real dx3 = PI*0.01;
+          Real grad_pressure_x1 = (Pressure(x1+dx1, x2, x3) - Pressure(x1-dx1, x2, x3)) / (2.0*dx1);
+          Real grad_pressure_x2 = (Pressure(x1, x2+dx2, x3) - Pressure(x1, x2-dx2, x3)) / (2.0*dx2*x1);
+          Real grad_pressure_x3 = (Pressure(x1, x2, x3+dx2) - Pressure(x1, x2, x3-dx3)) / (2.0*dx3*x1*sin(x2));
+          Vec3D grad_pressure = Vec3D::FromSph(
+            grad_pressure_x1, grad_pressure_x2, grad_pressure_x3
+          );
+          Vec3D nhat = get_nhat_tilt(diskinc);
+          Vec3D grad_pressure_z = nhat * dot(nhat,grad_pressure);
+          Vec3D grad_pressure_r = grad_pressure - grad_pressure_z;
+          Vec3D position_on_midplane = r_perpendicular(Vec3D::FromSph(x1,x2,x3), diskinc);
+          Vec3D midplane_direction = position_on_midplane * (1.0/position_on_midplane.magnitude());
+          Real dpdR = dot(grad_pressure_r, midplane_direction);
+          
+	        // Real dpdR= (PoverRsf(x1+dx1, x2, x3)*DenProfilesf(x1+dx1, x2, x3)
+          //           -PoverRsf(x1-dx1, x2, x3)*DenProfilesf(x1-dx1, x2, x3))/2./dx1*cos(angle_above_midplane)+
+		      //           (PoverRsf(x1, x2+dx2, x3)*DenProfilesf(x1, x2+dx2, x3)
+          //           -PoverRsf(x1, x2-dx2, x3)*DenProfilesf(x1, x2-dx2, x3))/2./dx2*sin(angle_above_midplane)/x1;
+          // Real vel2 = gms*r*r/sqrt(r*r+z*z)/(r*r+z*z)+r/DenProfilesf(x1, x2, x3)*dpdR; // original
+          Real vel2 = gm_primary*sqrt(r*r+z*z)/(r*r+z*z)+r/DenProfilesf(x1, x2, x3)*dpdR; // changing grav term
+          if (vel2 < 0) {
+            std::cout << "\033[1;31m[ERROR]\033[0m Imaginary Velocity at ("
+            << x1 << ", " << x2 << ", " << x3 << ")\n"
+            << "r = " << r << "\nz = " << z << "\ndpdR = "
+            << dpdR << "\nrho = " << DenProfilesf(x1, x2, x3) << "\n";
+          }
+	        vel = sqrt(
+            std::max(
+              vel2,
+              0.0
+            )
+          );
         }
       } else {
-        vel = dslope*p0_over_r0/(gms/r)+1.0;
-        vel = sqrt(gms/r)*sqrt(vel);
-      }
-    }
-    if (vflag == 21) {
-      if (x1 <= rrigid) {
-	      vel=origid*fabs(x1*sin(x2));
+        vel = dslope*p0_over_r0/(gm_primary/r)+1.0;
+        vel = sqrt(gm_primary/r)*sqrt(vel);
       }
     }
     Vec3D nhat = get_nhat_tilt(diskinc);
@@ -1099,7 +1036,7 @@ static void VelProfilesf(const Real x1, const Real x2, const Real x3,
   } else if (vflag ==3) {
     v1 = 0.0;
     v2 = 0.0;
-    v3 = gms*x1*sin(x2);
+    v3 = gm_primary*x1*sin(x2);
   } 
   if(omegarot!=0.0) v3-=omegarot*fabs(x1*sin(x2));
   return;
@@ -1116,22 +1053,6 @@ static Real sin2th(const Real x1, const Real x2, const Real x3){
     );
 }
 
-static Real pert(const Real x1, const Real x2, const Real x3){
-    Real res;
-    if (pert_mode==0) {
-      res = diskinc;
-    } else if (pert_mode==1) {
-      res = pert_amp*exp(-SQR(x1-pert_center)/SQR(pert_width));
-    } else if (pert_mode==2) {
-      if (x1 <= pert_cut) res=0;
-      else res=diskinc;
-    } else if (pert_mode==3) {
-      res = pert_amp*exp(-SQR(x1-pert_center)/SQR(pert_width));
-      if (x1 >= pert_center) res=pert_amp;
-    }
-    return res;
-}
-
 void AlphaViscosity(HydroDiffusion *phdif, MeshBlock *pmb, const AthenaArray<Real> &prim,
      const AthenaArray<Real> &bcc, int is, int ie, int js, int je, int ks, int ke)
 {
@@ -1143,7 +1064,7 @@ void AlphaViscosity(HydroDiffusion *phdif, MeshBlock *pmb, const AthenaArray<Rea
 #pragma simd
         for (int i=is; i<=ie; ++i){
 	        Real r=pco->x1v(i)*sin(pco->x2v(j));
-          phdif->nu(HydroDiffusion::DiffProcess::iso,k,j,i) = alpha*PoverR(pco->x1v(i),pco->x2v(j),pco->x3v(k))/sqrt(gmass_primary/r/r/r);
+          phdif->nu(HydroDiffusion::DiffProcess::iso,k,j,i) = alpha*PoverR(pco->x1v(i),pco->x2v(j),pco->x3v(k))/sqrt(gm_primary/r/r/r);
 	      }
       }
     }
@@ -1459,40 +1380,6 @@ void StratOuterX2(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim, Fac
 }
 void MeshBlock::InitUserMeshBlockData(ParameterInput *pin)
 {
-  int nuser_out=pin->GetOrAddInteger("mesh","nuser_out_var",0);
-  AllocateUserOutputVariables(nuser_out);
-  if(ifov_flag==1 or ifov_flag==2){
-    int nx1 = (ie-is)+1 + 2*(NGHOST);
-    x1area.NewAthenaArray(nx1);
-    x2area.NewAthenaArray(nx1);
-    x2area_p1.NewAthenaArray(nx1);
-    x3area.NewAthenaArray(nx1);
-    x3area_p1.NewAthenaArray(nx1);
-    vol.NewAthenaArray(nx1);
-  }
-
-  if (ionization==1){
-    int nx1 = (ie-is)+1 + 2*(NGHOST);
-    int nx2 = (je-js)+1 + 2*(NGHOST);
-    int nx3 = (ke-ks)+1;
-    if(block_size.nx3 > 1) nx3 = nx3+2*(NGHOST);
-    AllocateRealUserMeshBlockDataField(11);
-    AllocateIntUserMeshBlockDataField(1);
-    ruser_meshblock_data[0].NewAthenaArray(nx3,nx2,nx1); // local surface density in x1 direction within the meshblock
-    ruser_meshblock_data[1].NewAthenaArray(nx3,nx2,nx1); // local surface density in x1 direction within the process
-    ruser_meshblock_data[2].NewAthenaArray(nx3*nx2); // total surface density in x1 direction to send to the next process
-    ruser_meshblock_data[3].NewAthenaArray(nx3,nx2,nx1); // ionization parameter
-    ruser_meshblock_data[4].NewAthenaArray(nx3,nx2,nx1); // dust temperature
-    ruser_meshblock_data[5].NewAthenaArray(nx3,nx2,nx1); // local surface density in x2 direction within the meshblock    
-    ruser_meshblock_data[6].NewAthenaArray(nx3,nx2,nx1); // local surface density in x2 direction within the process
-    ruser_meshblock_data[7].NewAthenaArray(nx3,nx2,nx1); // ionization fraction
-    ruser_meshblock_data[8].NewAthenaArray(nx3,nx2,nx1); // Ohmic diffusion coefficients
-    ruser_meshblock_data[9].NewAthenaArray(nx3,nx2,nx1); // Hall coefficients
-    ruser_meshblock_data[10].NewAthenaArray(nx3,nx2,nx1); // ambipolar diffusion coefficients
-
-    iuser_meshblock_data[0].NewAthenaArray(2); // smallest and biggest loc.lx1 within the process
-     
-  }
   return;
 } 
 
@@ -1515,7 +1402,7 @@ void Cooling(MeshBlock *pmb, const Real dt, const AthenaArray<Real> &prim,
                 cons(IDN,k,j,i)=rho_floor(pco->x1v(i),pco->x2v(j),pco->x3v(k));
               }
 	      // to avoid the divergence at 0 for both Keplerian motion and p_over_r
-        Real r = std::max(fabs(pco->x1v(i)*sinx2),xcut);
+        Real r = std::max(fabs(pco->x1v(i)*sinx2),rin);
         Real eint = cons(IEN,k,j,i)-0.5*(SQR(cons(IM1,k,j,i))+SQR(cons(IM2,k,j,i))
                             +SQR(cons(IM3,k,j,i)))/cons(IDN,k,j,i);
         Real pres_over_r=eint*(gamma_gas-1.0)/cons(IDN,k,j,i);
@@ -1532,7 +1419,7 @@ void Cooling(MeshBlock *pmb, const Real dt, const AthenaArray<Real> &prim,
 	        cons(IEN,k,j,i)=eint+0.5*(SQR(cons(IM1,k,j,i))+SQR(cons(IM2,k,j,i))
 				     +SQR(cons(IM3,k,j,i)))/cons(IDN,k,j,i);
          }
-        Real dtr = std::max(tcool*2.*PI/sqrt(gmass_primary/r/r/r),dt);
+        Real dtr = std::max(tcool*2.*PI/sqrt(gm_primary/r/r/r),dt);
         Real dfrac=dt/dtr;
         Real dE=eint-p_over_r/(gamma_gas-1.0)*cons(IDN,k,j,i);
         cons(IEN,k,j,i) -= dE*dfrac;
@@ -1551,7 +1438,7 @@ void Cooling(MeshBlock *pmb, const Real dt, const AthenaArray<Real> &prim,
 void Damp(MeshBlock *pmb, const Real dt, const AthenaArray<Real> &prim, 
 	  const AthenaArray<Real> &bcc, AthenaArray<Real> &cons)
 {
- Real rdi1=1.25*xcut;
+ Real rdi1=1.25*rin;
  Real ramp = 0.0, tau=0.0, lambda=0.0, e_nomag=0.0;
  if(tdamp>0.0) {
   Coordinates *pco = pmb->pcoord;
@@ -1563,13 +1450,13 @@ void Damp(MeshBlock *pmb, const Real dt, const AthenaArray<Real> &prim,
         Real x2 = pco->x2v(j);
         Real x3 = pco->x3v(k);
               // to avoid the divergence at 0 for both Keplerian motion and p_over_r
-        Real r = std::max(fabs(x1*sinx2),xcut);
+        Real r = std::max(fabs(x1*sinx2),rin);
               // damp timescale
         ramp = 0.0;
         if(x1 < rdi1){
-                ramp = (x1-rdi1)/(rdi1-xcut);
+                ramp = (x1-rdi1)/(rdi1-rin);
                 ramp = ramp*ramp;
-                tau = 2.0*PI*sqrt(r*r*r/gmass_primary)*tdamp;
+                tau = 2.0*PI*sqrt(r*r*r/gm_primary)*tdamp;
               }
               // desired quantities
         Real den, v1, v2, v3, m1, m2, m3, eint;
@@ -1623,11 +1510,8 @@ void Damp(MeshBlock *pmb, const Real dt, const AthenaArray<Real> &prim,
 Real grav_pot_car_btoa(const Real xca, const Real yca, const Real zca,
         const Real xcb, const Real ycb, const Real zcb, const Real gb)
 {
-  Real dist_sq;
-  if(cylpot==1) dist_sq = (xca-xcb)*(xca-xcb) + (yca-ycb)*(yca-ycb);
-  else dist_sq = (xca-xcb)*(xca-xcb) + (yca-ycb)*(yca-ycb) + (zca-zcb)*(zca-zcb);
-  Real pot = -gb*(dist_sq+1.5*rsoft2)/(dist_sq+rsoft2)/sqrt(dist_sq+rsoft2);
-  return(pot);
+  Real dist_sq = (xca-xcb)*(xca-xcb) + (yca-ycb)*(yca-ycb) + (zca-zcb)*(zca-zcb);
+  return -gb / dist_sq;
 }
 
 /**
@@ -1657,46 +1541,6 @@ Real grav_pot_car_cen(const Real xca, const Real yca, const Real zca) {
   Real pot;
   if(omegarot!=0.0) pot = -0.5*omegarot*omegarot*(xca*xca+yca*yca);
   return(pot);
-}
-
-void DepleteCir(MeshBlock *pmb, const Real dt, const AthenaArray<Real> &prim, AthenaArray<Real> &cons)
-{
-  Coordinates *pco = pmb->pcoord;
-
-  for(int k=pmb->ks; k<=pmb->ke; ++k){
-    for (int j=pmb->js; j<=pmb->je; ++j) {
-      for (int i=pmb->is; i<=pmb->ie; ++i) {
-        Real R=pco->x1v(i);
-        Real th=pco->x2v(j);
-        Real phi=pco->x3v(k);
-        Real xg = R*sin(th)*cos(phi);
-        Real yg = R*sin(th)*sin(phi);
-        Real zg = R*cos(th);
-        Real rdist = sqrt(SQR(xg-psys->xp)+SQR(yg-psys->yp)+SQR(zg-psys->zp));
-        Real v1=0.0;
-        Real v2=0.0;
-        Real v3=0.0;
-        if(rdist>rocird){
-          cons(IDN,k,j,i) = dcird;
-          cons(IM1,k,j,i) = dcird*v1;
-          cons(IM2,k,j,i) = dcird*v2;
-          cons(IM3,k,j,i) = dcird*v3;
-        }
-        if(rdist<3.*rcird){
-          Real dtr = std::max(tcird, dt);
-          Real dfrac = dt/dtr;
-          cons(IDN,k,j,i) -= (cons(IDN,k,j,i) - dcird)*dfrac;
-          cons(IM1,k,j,i) -= (cons(IM1,k,j,i) - dcird*v1)*dfrac;
-          cons(IM2,k,j,i) -= (cons(IM2,k,j,i) - dcird*v2)*dfrac;
-          cons(IM3,k,j,i) -= (cons(IM3,k,j,i) - dcird*v3)*dfrac;
-          if(NON_BAROTROPIC_EOS) {
-            Real ende=0.5*dcird*(SQR(v1)+SQR(v2)+SQR(v3))+PoverR(R,th,phi)*dcird/(gamma_gas - 1.0);
-            cons(IEN,k,j,i) -= (cons(IEN,k,j,i) - ende)*dfrac;
-          }
-        }
-      }
-    }
-  }
 }
 
 //******** Grav force from GM1, and indirect term
@@ -1756,14 +1600,13 @@ void PlanetarySourceTerms(
             -grav_pot_car_btoa(xcar, ycar-drs, zcar,xpp,ypp,zpp,mp))/(2.0*drs);
         Real f_zca = -1.0* (grav_pot_car_btoa(xcar, ycar, zcar+drs,xpp,ypp,zpp,mp)
           -grav_pot_car_btoa(xcar, ycar, zcar-drs,xpp,ypp,zpp,mp))/(2.0*drs);
-        if(ind!=0){
-          f_xca += -1.0* (grav_pot_car_ind(xcar+drs, ycar, zcar,xpp,ypp,zpp,mp)
-                                  -grav_pot_car_ind(xcar-drs, ycar, zcar,xpp,ypp,zpp,mp))/(2.0*drs);
-          f_yca += -1.0* (grav_pot_car_ind(xcar, ycar+drs, zcar,xpp,ypp,zpp,mp)
-                                  -grav_pot_car_ind(xcar, ycar-drs, zcar,xpp,ypp,zpp,mp))/(2.0*drs);
-          f_zca += -1.0* (grav_pot_car_ind(xcar, ycar, zcar+drs,xpp,ypp,zpp,mp)
-                                  -grav_pot_car_ind(xcar, ycar, zcar-drs,xpp,ypp,zpp,mp))/(2.0*drs);
-        }
+        // Indirect terms
+        f_xca += -1.0* (grav_pot_car_ind(xcar+drs, ycar, zcar,xpp,ypp,zpp,mp)
+                                -grav_pot_car_ind(xcar-drs, ycar, zcar,xpp,ypp,zpp,mp))/(2.0*drs);
+        f_yca += -1.0* (grav_pot_car_ind(xcar, ycar+drs, zcar,xpp,ypp,zpp,mp)
+                                -grav_pot_car_ind(xcar, ycar-drs, zcar,xpp,ypp,zpp,mp))/(2.0*drs);
+        f_zca += -1.0* (grav_pot_car_ind(xcar, ycar, zcar+drs,xpp,ypp,zpp,mp)
+                                -grav_pot_car_ind(xcar, ycar, zcar-drs,xpp,ypp,zpp,mp))/(2.0*drs);
         f_x1 += f_xca*sinx2*cosx3+f_yca*sinx2*sinx3+f_zca*cosx2;
         f_x2 += f_xca*cosx2*cosx3+f_yca*cosx2*sinx3-f_zca*sinx2;
         f_x3 += f_xca*(-sinx3) + f_yca*cosx3;
@@ -1802,7 +1645,6 @@ void PlanetarySourceTerms(
       }
     }
   }
-  if(rcird>0.0) DepleteCir(pmb,dt,prim,cons); 
   if(tdamp>0.0) Damp(pmb,dt,prim,bcc,cons);
   if(NON_BAROTROPIC_EOS&&tcool>0.0) Cooling(pmb,dt,prim,bcc,cons);
 }
@@ -1813,7 +1655,7 @@ void PlanetarySourceTerms(
 void BinarySystem::fixorbit(double dt)
 {
   double dis=sqrt(xp*xp+yp*yp);
-  double ome=sqrt((gmass_primary+mass)/dis/dis/dis);
+  double ome=sqrt((gm_primary+mass)/dis/dis/dis);
   double ang=acos(xp/dis);
   if(yp<0.0) ang=2*PI-ang;
   ang += ome*dt;
