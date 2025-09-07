@@ -250,7 +250,6 @@ static Real timeout=0.0,dtorbit;
 
 // disk inclination
 static Real pert(const Real x1, const Real x2, const Real x3);      // perturbation angle 
-static Real sin2th(const Real x1, const Real x2, const Real x3);    // 
 static int pert_mode;
 static Real pert_center, pert_width, pert_amp, pert_cut, diskinc;
 // Viscosity
@@ -271,11 +270,6 @@ static void VelProfilesf(const Real x1, const Real x2, const Real x3, const Real
                        Real &v1, Real &v2, Real &v3);
 static Real Interp(const Real r, const Real z, const int nxaxis, const int nyaxis, AthenaArray<Real> &xaxis, 
                    AthenaArray<Real> &yaxis, AthenaArray<Real> &datatable );
-// Functions for coordinate conversion
-void ConvCarSph(const Real x, const Real y, const Real z, Real &rad, Real &theta, Real &phi);
-void ConvSphCar(const Real rad, const Real theta, const Real phi, Real &x, Real &y, Real &z);
-void ConvVCarSph(const Real x, const Real y, const Real z, const Real vx, const Real vy, const Real vz, Real &vr, Real &vt, Real &vp);
-void ConvVSphCar(const Real rad, const Real theta, const Real phi, const Real vr, const Real vt, const Real vp, Real &vx, Real &vy, Real &vz);
 // Planet Potential
 Real grav_pot_car_btoa(const Real xca, const Real yca, const Real zca,
         const Real xcb, const Real ycb, const Real zcb, const Real gb);
@@ -566,19 +560,7 @@ void MeshBlock::ProblemGenerator(ParameterInput *pin)
 static Real rho_floor(const Real x1, const Real x2, const Real x3)
 {
   Real rhof;
-  if(dflag==4){
-    Real xsf,ysf,zsf,xpf,ypf,zpf,rsphsf,thetasf,phisf;
-    ConvSphCar(x1, x2, x3, xpf, ypf, zpf);
-    xsf=xpf-r0;
-    ysf=ypf;
-    zsf=zpf;
-    ConvCarSph(xsf,ysf,zsf,rsphsf,thetasf,phisf);
-    rhof=rho_floorsf(rsphsf,thetasf,phisf);
-  }else{
-    // Real x2h = asin(sqrt(sin2th(x1,x2,x3)));
-    // rhof=rho_floorsf(x1,x2h,0.0);
-    rhof=rho_floorsf(x1,x2,x3);
-  }
+  rhof=rho_floorsf(x1,x2,x3);
   return rhof;
 }
 
@@ -628,19 +610,7 @@ static Real rho_floorsf(const Real x1, const Real x2, const Real x3)
 static Real DenProfile(const Real x1, const Real x2, const Real x3)
 {
   Real den;
-  if(dflag==4){
-    Real xsf,ysf,zsf,xpf,ypf,zpf,rsphsf,thetasf,phisf;
-    ConvSphCar(x1, x2, x3, xpf, ypf, zpf);
-    xsf=xpf-r0;
-    ysf=ypf;
-    zsf=zpf;
-    ConvCarSph(xsf,ysf,zsf,rsphsf,thetasf,phisf);
-    den=DenProfilesf(rsphsf,thetasf,phisf);
-  }else{
-    // Real x2h = asin(sqrt(sin2th(x1,x2,x3)));
-    // den=DenProfilesf(x1,x2h,0.0);
-    den=DenProfilesf(x1,x2,x3);
-  }
+  den=DenProfilesf(x1,x2,x3);
   return den;
 }
 
@@ -767,19 +737,7 @@ static Real Interp(const Real r, const Real z, const int nxaxis, const int nyaxi
 static Real PoverR(const Real x1, const Real x2, const Real x3)
 {
   Real por;
-  if(dflag==4){
-    Real xsf,ysf,zsf,xpf,ypf,zpf,rsphsf,thetasf,phisf;
-    ConvSphCar(x1, x2, x3, xpf, ypf, zpf);
-    xsf=xpf-r0;
-    ysf=ypf;
-    zsf=zpf;
-    ConvCarSph(xsf,ysf,zsf,rsphsf,thetasf,phisf);
-    por=PoverRsf(rsphsf,thetasf,phisf);
-  }else{
-    // Real x2h = asin(sqrt(sin2th(x1,x2,x3)));
-    // por=PoverRsf(x1,x2h,0.0);
-    por=PoverRsf(x1,x2,x3);
-  }
+  por=PoverRsf(x1,x2,x3);
   return por;
 }
 
@@ -880,62 +838,9 @@ static Real PoverRsf(const Real x1, const Real x2, const Real x3)
 static void VelProfile(const Real x1, const Real x2, const Real x3,
                                 const Real den, Real &v1, Real &v2, Real &v3)
 {
-  std::stringstream msg;
-  Real xsf,ysf,zsf,xpf,ypf,zpf,rcylsf,rcyld,den0, rsphsf, thetasf, phisf;
-  Real vrsphsf, vthetasf, vphisf, vxsf, vysf, vzsf;
-  if(dflag==4){
-    ConvSphCar(x1, x2, x3, xpf, ypf, zpf);
-    xsf=xpf-r0;
-    ysf=ypf;
-    zsf=zpf;
-    ConvCarSph(xsf, ysf, zsf, rsphsf, thetasf, phisf);
-    VelProfilesf(rsphsf, thetasf, phisf, den, vrsphsf, vthetasf, vphisf); 
-    ConvVSphCar(rsphsf, thetasf, phisf, vrsphsf, vthetasf, vphisf, vxsf, vysf, vzsf);
-    ConvVCarSph(xpf, ypf, zpf, vxsf, vysf, vzsf, v1, v2, v3);
-  }else{
-    // Real sinx2h=sqrt(sin2th(x1,x2,x3));
-    // Real x2h = asin(sinx2h);
-    // Real v1s, v2s, v3s;
-    // VelProfilesf(x1,x2h,x3,den,v1s,v2s,v3s);
-    // v1 = v1s;
-    // v2 = v3s*sin(pert(x1,x2,x3))*cos(x3)/(sinx2h+1.e-10);
-    // v3 = v3s*(cos(pert(x1,x2,x3))*sin(x2) - sin(x3)*sin(pert(x1,x2,x3))*cos(x2))/(sinx2h+1.e-10);
-    VelProfilesf(x1,x2,x3,den,v1,v2,v3);
-  }
+  VelProfilesf(x1,x2,x3,den,v1,v2,v3);
   return;
 }
-
-void ConvCarSph(const Real x, const Real y, const Real z, Real &rad, Real &theta, Real &phi){
-  rad=sqrt(x*x+y*y+z*z);
-  theta=acos(z/rad);
-  phi=atan2(y,x);
-  return;
-}
-
-void ConvSphCar(const Real rad, const Real theta, const Real phi, Real &x, Real &y, Real &z){
-  x=rad*sin(theta)*cos(phi);
-  y=rad*sin(theta)*sin(phi);
-  z=rad*cos(theta);
-  return;
-}
-
-void ConvVCarSph(const Real x, const Real y, const Real z, const Real vx, const Real vy, const Real vz, Real &vr, Real &vt, Real &vp){
-  Real rads=sqrt(x*x+y*y+z*z);
-  Real radc=sqrt(x*x+y*y);
-  vr=vx*x/rads+vy*y/rads+vz*z/rads;
-  vt=((x*vx+y*vy)*z-radc*radc*vz)/rads/radc;
-  vp=vy*x/radc-vx*y/radc;
-  return;
-}
-
-void ConvVSphCar(const Real rad, const Real theta, const Real phi, const Real vr, const Real vt, const Real vp, Real &vx, Real &vy, Real &vz){
-  vx=vr*sin(theta)*cos(phi)+vt*cos(theta)*cos(phi)-vp*sin(phi);
-  vy=vr*sin(theta)*sin(phi)+vt*cos(theta)*sin(phi)+vp*cos(phi);
-  vz=vr*cos(theta)-vt*sin(theta);
-  return;
-}
-
-
 static Real Pressure(const Real x1, const Real x2, const Real x3) {
   return PoverRsf(x1, x2, x3)*DenProfilesf(x1, x2, x3);
 }
@@ -1042,17 +947,6 @@ static void VelProfilesf(const Real x1, const Real x2, const Real x3,
   return;
 }
 
-
-// When there is no perturbation, this reduces to sin^2(theta)
-static Real sin2th(const Real x1, const Real x2, const Real x3){
-    return (
-      SQR(cos(x3))*SQR(sin(x2))
-      +SQR(cos(pert(x1,x2,x3)))*SQR(sin(x3))*SQR(sin(x2))
-      +SQR(sin(pert(x1,x2,x3)))*SQR(cos(x2))
-      - 2.0*cos(pert(x1,x2,x3))*sin(pert(x1,x2,x3))*cos(x2)*sin(x2)*sin(x3)
-    );
-}
-
 void AlphaViscosity(HydroDiffusion *phdif, MeshBlock *pmb, const AthenaArray<Real> &prim,
      const AthenaArray<Real> &bcc, int is, int ie, int js, int je, int ks, int ke)
 {
@@ -1061,9 +955,13 @@ void AlphaViscosity(HydroDiffusion *phdif, MeshBlock *pmb, const AthenaArray<Rea
     // std::cout<<alpha<<std::endl;
     for (int k=ks; k<=ke; ++k) {
       for (int j=js; j<=je; ++j) {
-#pragma simd
+        #pragma simd
         for (int i=is; i<=ie; ++i){
-	        Real r=pco->x1v(i)*sin(pco->x2v(j));
+          Real x1 = pco->x1v(i);
+          Real x2 = pco->x2v(j);
+          Real x3 = pco->x3v(k);
+          Vec3D v = Vec3D::FromSph(x1,x2,x3);
+          Real r = get_midplane_projection_distance(v,diskinc);
           phdif->nu(HydroDiffusion::DiffProcess::iso,k,j,i) = alpha*PoverR(pco->x1v(i),pco->x2v(j),pco->x3v(k))/sqrt(gm_primary/r/r/r);
 	      }
       }
