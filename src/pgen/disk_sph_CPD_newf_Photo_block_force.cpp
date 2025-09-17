@@ -471,7 +471,7 @@ void Mesh::InitUserMeshData(ParameterInput *pin)
   }
   // Enroll User Source terms
   
-  // EnrollUserExplicitSourceFunction(PlanetarySourceTerms);
+  EnrollUserExplicitSourceFunction(PlanetarySourceTerms);
   // Enroll Viscosity
   if (alpha > 0.0) {
     EnrollViscosityCoefficient(AlphaViscosity);
