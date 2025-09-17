@@ -1296,30 +1296,37 @@ void Cooling(MeshBlock *pmb, const Real dt, const AthenaArray<Real> &prim,
      for (int j=pmb->js; j<=pmb->je; ++j) {
        Real sinx2=sin(pco->x2v(j));
        for (int i=pmb->is; i<=pmb->ie; ++i) {
-        if (cons(IDN,k,j,i)<rho_floor(pco->x1v(i),pco->x2v(j),pco->x3v(k))) {
-                cons(IDN,k,j,i)=rho_floor(pco->x1v(i),pco->x2v(j),pco->x3v(k));
+        static Real x1 = pco->x1f(i);
+        static Real x2 = pco->x2f(j);
+        static Real x3 = pco->x3f(k);
+        Vec3D rvec = Vec3D::FromSph(x1,x2,x3);
+        Real _rho_floor = rho_floor(x1,x2,x3);
+        if (cons(IDN,k,j,i)<_rho_floor) {
+                cons(IDN,k,j,i)=_rho_floor;
               }
+        Real r = get_midplane_projection_distance(rvec,diskinc);
+        Real z = get_z_above_midplane(rvec,diskinc);
 	      // to avoid the divergence at 0 for both Keplerian motion and p_over_r
-        Real r = std::max(fabs(pco->x1v(i)*sinx2),rin);
+        Real rmod = std::max(r,rin);
         Real eint = cons(IEN,k,j,i)-0.5*(SQR(cons(IM1,k,j,i))+SQR(cons(IM2,k,j,i))
                             +SQR(cons(IM3,k,j,i)))/cons(IDN,k,j,i);
-        Real pres_over_r=eint*(gamma_gas-1.0)/cons(IDN,k,j,i);
-        Real p_over_r = PoverR(pco->x1v(i),pco->x2v(j),pco->x3v(k)); 
+        Real p_over_r_current=eint*(gamma_gas-1.0)/cons(IDN,k,j,i);
+        Real p_over_r_initial = PoverR(pco->x1v(i),pco->x2v(j),pco->x3v(k)); 
 	      // reset temperature when the temperature is below tlow times the initial temperature
-        if(tlow>0 && pres_over_r<tlow*p_over_r){
-          eint=tlow*p_over_r*cons(IDN,k,j,i)/(gamma_gas-1.0);
+        if(tlow>0 && p_over_r_current<tlow*p_over_r_initial){
+          eint=tlow*p_over_r_initial*cons(IDN,k,j,i)/(gamma_gas-1.0);
 	        cons(IEN,k,j,i)=eint+0.5*(SQR(cons(IM1,k,j,i))+SQR(cons(IM2,k,j,i))
 			             +SQR(cons(IM3,k,j,i)))/cons(IDN,k,j,i);
          }
 	      // reset temperature when the temperature is above thigh times the initial temperature
-        if(thigh>0 && pres_over_r>thigh*p_over_r){
-          eint=thigh*p_over_r*cons(IDN,k,j,i)/(gamma_gas-1.0);
+        if(thigh>0 && p_over_r_current>thigh*p_over_r_initial){
+          eint=thigh*p_over_r_initial*cons(IDN,k,j,i)/(gamma_gas-1.0);
 	        cons(IEN,k,j,i)=eint+0.5*(SQR(cons(IM1,k,j,i))+SQR(cons(IM2,k,j,i))
 				     +SQR(cons(IM3,k,j,i)))/cons(IDN,k,j,i);
          }
         Real dtr = std::max(tcool*2.*PI/sqrt(gm_primary/r/r/r),dt);
         Real dfrac=dt/dtr;
-        Real dE=eint-p_over_r/(gamma_gas-1.0)*cons(IDN,k,j,i);
+        Real dE=eint-p_over_r_initial/(gamma_gas-1.0)*cons(IDN,k,j,i);
         cons(IEN,k,j,i) -= dE*dfrac;
       }
     }
@@ -1466,12 +1473,10 @@ void PlanetarySourceTerms(
 
     timeout+=dtorbit;
   }
-  // x3 is theta
   for (int k=pmb->ks; k<=pmb->ke; ++k) {
     Real x3=pco->x3v(k);
     Real cosx3=cos(x3);
     Real sinx3=sin(x3);
-    // x2 is phi
     for (int j=pmb->js; j<=pmb->je; ++j) {
       Real x2=pco->x2v(j);
       Real cosx2=cos(x2);
