@@ -504,9 +504,9 @@ void MeshBlock::ProblemGenerator(ParameterInput *pin)
   std::srand(gid);
 
   //  Initialize density
-  std::cout << "[Block" << gid << "] Initializing Density\n";
+  // std::cout << "[Block" << gid << "] Initializing Density\n";
   for(int k=ks; k<=ke; ++k) {
-    std::cout << "[Block" << gid << ", DEN] Starting ix1=" << k << " of " << ke << "\n";
+    // std::cout << "[Block" << gid << ", DEN] Starting ix1=" << k << " of " << ke << "\n";
     for (int j=js; j<=je; ++j) {
       for (int i=is; i<=ie; ++i) {
 	      phydro->u(IDN,k,j,i) = DenProfile(pcoord->x1v(i),pcoord->x2v(j),pcoord->x3v(k));
@@ -515,9 +515,9 @@ void MeshBlock::ProblemGenerator(ParameterInput *pin)
   }
 
   //  Initialize velocity
-  std::cout << "[Block" << gid << "] Initializing Velocity\n";
+  // std::cout << "[Block" << gid << "] Initializing Velocity\n";
   for(int k=ks; k<=ke; ++k) {
-    std::cout << "[Block" << gid << " VEL] Starting ix1=" << k << " of " << ke << '\n';
+    // std::cout << "[Block" << gid << " VEL] Starting ix1=" << k << " of " << ke << '\n';
     for (int j=js; j<=je; ++j) {
       for (int i=is; i<=ie; ++i) {
 	      Real x1 = pcoord->x1v(i);
@@ -533,9 +533,9 @@ void MeshBlock::ProblemGenerator(ParameterInput *pin)
   }
   //  Initialize pressure
   if (NON_BAROTROPIC_EOS){
-    std::cout << "[Block" << gid << "] Initializing Pressure\n";
+    // std::cout << "[Block" << gid << "] Initializing Pressure\n";
     for(int k=ks; k<=ke; ++k) {
-      std::cout << "[Block" << gid << " PRE] Starting ix1=" << k << " of " << ke << '\n';
+      // std::cout << "[Block" << gid << " PRE] Starting ix1=" << k << " of " << ke << '\n';
       for (int j=js; j<=je; ++j) {
         for (int i=is; i<=ie; ++i) {
           Real x1 = pcoord->x1v(i);
@@ -759,76 +759,15 @@ static Real PoverR_vertical_isothermal(
 
 static Real PoverRsf(const Real x1, const Real x2, const Real x3)
 {  
-  Real poverr;
-  Vec3D v = Vec3D::FromSph(x1,x2,x3);
-  Real r = get_midplane_projection_distance(v,diskinc);
-  Real z = fabs(get_z_above_midplane(v,diskinc));
-  if (tflag == 0) {
-    poverr = PoverR_vertical_isothermal(
-      r,rin,p0_over_r0,r0,pslope
-    );
-  } else if(tflag == 1){
-    Real poverrmid = p0_over_r0*pow(r/r0, pslope);
-    Real h = sqrt(poverrmid)/sqrt(gm_primary/r/r/r);
-    if (z<h) {
-      poverr=poverrmid;
-    } else if (z>4*h){
-      poverr=50.*poverrmid;
-    } else {
-      poverr=poverrmid*pow(3.684,(z-h)/h);
-    }
-  } else if(tflag == 11){
-    Real poverrmid = p0_over_r0*pow(r/r0, pslope);
-    Real h = sqrt(poverrmid)/sqrt(gm_primary/r/r/r);
-    if (z<h) {
-      poverr=poverrmid;
-    } else if (z>8*h){
-      poverr=0.04*gm_primary/r;
-    } else {
-      poverr=(poverrmid+0.04*gm_primary/r)/2+(0.04*gm_primary/r-poverrmid)/2*sin((z/h-1.)/7*M_PI-M_PI/2.);
-    }
-  } else if(tflag == 12){
-    Real poverrmid = p0_over_r0*pow(r/r0, pslope);
-    Real h = sqrt(poverrmid)/sqrt(gm_primary/r/r/r);
-		Real pr_hot1 = 4.5*poverrmid;
-		Real pr_hot2 = 130.*poverrmid;
-    if (z<1.5*h) {
-      poverr=poverrmid;
-    } else if (z>1.5*h && z<=7.*h){
-      poverr=(poverrmid+pr_hot1)/2.+(pr_hot1-poverrmid)/2.*sin((z/h-1.5)/5.5*M_PI-M_PI/2.);
-    } else {
-      poverr=pr_hot1+(pr_hot2-pr_hot1)*tanh((z/h-7.)/10.);
-    }
-  } else if(tflag == 13){ // exactly the same as Bai & Stone 2017
-    Real poverrmid = p0_over_r0*pow(r/r0, pslope);
-		Real theta_trans=0.3;
-    Real HoR0=sqrt(poverrmid);
-    Real HoRc=0.3;
-    Real HoRp=0.5;
-    Real gc,delta_theta,thetat;
-		delta_theta = std::fabs(x2-0.5*M_PI)-theta_trans;
-    thetat = 0.5*M_PI-theta_trans;
-    gc = 1.0 + (HoRc-HoR0+(HoRp-HoRc)*std::max(delta_theta,0.0)/thetat)*0.5*(tanh(delta_theta/HoR0)+1.0)/HoR0;
-		poverr = gc*HoR0*gc*HoR0;
-  } else if(tflag == 14){
-    Real poverrmid = p0_over_r0*pow(r/r0, pslope);
-    Real HoR0=sqrt(p0_over_r0)*pow(r/r0,(pslope+1.)/2.);
-    Real HoRc=0.4*pow(r/r0,(pslope+1.)/2.);
-    Real HoRp=0.67*pow(r/r0,(pslope+1.)/2.);
-    Real theta_trans=atan(3.*HoR0);
-    Real gc,delta_theta,thetat;
-		delta_theta = std::fabs(x2-0.5*M_PI)-theta_trans;
-    thetat = 0.5*M_PI-theta_trans;
-    gc = 1.0 + (HoRc-HoR0+(HoRp-HoRc)*std::max(delta_theta,0.0)/thetat)*0.5*(tanh(delta_theta/HoR0)+1.0)/HoR0;
-    gc = 1.0 + (HoRc-HoR0+(HoRp-HoRc)*std::max(delta_theta,0.0)/thetat)*0.5*(tanh(delta_theta/atan(HoR0))+1.0)/HoR0;
-		poverr = gc*HoR0*gc*HoR0;
-  } else if(tflag == 2){
-    poverr = p0_over_r0*pow(r/r0, pslope); 
-  } else if(tflag == 5){
-    poverr = Interp(r, z, nrtable, nztable, rtable, ztable, portable);
-//    std::cout<<"por "<<poverr<<std::endl;
-  }
-  return(poverr);
+  // Real poverr;
+  // Vec3D v = Vec3D::FromSph(x1,x2,x3);
+  // Real r = get_midplane_projection_distance(v,diskinc);
+  // Real z = fabs(get_z_above_midplane(v,diskinc));
+  // poverr = PoverR_vertical_isothermal(
+  //   r,rin,p0_over_r0,r0,pslope
+  // );
+  // return poverr;
+  return p0_over_r0 * pow(x1,pslope);
 }
 
 //------------------------------------------------------------------------------------
