@@ -1355,7 +1355,7 @@ Real grav_pot_car_btoa(const Real xca, const Real yca, const Real zca,
         const Real xcb, const Real ycb, const Real zcb, const Real gb)
 {
   Real dist_sq = (xca-xcb)*(xca-xcb) + (yca-ycb)*(yca-ycb) + (zca-zcb)*(zca-zcb);
-  return -gb / dist_sq;
+  return -gb / sqrt(dist_sq);
 }
 
 /**
@@ -1402,16 +1402,6 @@ void PlanetarySourceTerms(
   Real src[NHYDRO];
   Coordinates *pco = pmb->pcoord;
   // integrate planet orbit
-  if(myfile.is_open()&&Globals::my_rank==0&&time>=timeout) {
-    myfile<<time+dt<<' ';
-    // Real th=atan(psys->yp/psys->xp);
-    // if(psys->xp<0.0) th+=PI;
-    myfile<<psys->xp<<' '<<psys->yp<<' '<<psys->zp<<' ';
-    // <<' '<<psys->vxp<<' '<<psys->vyp<<' '<<psys->vzp<<' ';
-    myfile<<'\n'<<std::flush;
-
-    timeout+=dtorbit;
-  }
   for (int k=pmb->ks; k<=pmb->ke; ++k) {
     Real x3=pco->x3v(k);
     Real cosx3=cos(x3);
@@ -1452,25 +1442,37 @@ void PlanetarySourceTerms(
         f_x1 += f_xca*sinx2*cosx3+f_yca*sinx2*sinx3+f_zca*cosx2;
         f_x2 += f_xca*cosx2*cosx3+f_yca*cosx2*sinx3-f_zca*sinx2;
         f_x3 += f_xca*(-sinx3) + f_yca*cosx3;
-        if(omegarot!=0.0) {
-          Real omegar=omegarot*cosx2;
-          Real omegat=-omegarot*sinx2;
-          /* centrifugal force */
-          Real f_xca = -1.0* (grav_pot_car_cen(xcar+drs, ycar, zcar)
-            -grav_pot_car_cen(xcar-drs, ycar, zcar))/(2.0*drs);
-          Real f_yca = -1.0* (grav_pot_car_cen(xcar, ycar+drs, zcar)
-            -grav_pot_car_cen(xcar, ycar-drs, zcar))/(2.0*drs);
-          Real f_zca = -1.0* (grav_pot_car_cen(xcar, ycar, zcar+drs)
-            -grav_pot_car_cen(xcar, ycar, zcar-drs))/(2.0*drs);
-          f_x1 += f_xca*sinx2*cosx3+f_yca*sinx2*sinx3+f_zca*cosx2;
-          f_x2 += f_xca*cosx2*cosx3+f_yca*cosx2*sinx3-f_zca*sinx2;
-          f_x3 += f_xca*(-sinx3) + f_yca*cosx3;
-          /* Coriolis force */
-          f_x1 -= 2.0*omegat*prim(IM3,k,j,i);
-          f_x2 += 2.0*omegar*prim(IM3,k,j,i);
-          f_x3 -= 2.0*omegar*prim(IM2,k,j,i)-2.0*omegat*prim(IM1,k,j,i);
-        }
 
+        if(mp==0.0) {
+          if (f_x1 != 0.0) {
+            std::runtime_error("f_x1 should be zero")
+          }
+          if (f_x2 != 0.0) {
+            std::runtime_error("f_x2 should be zero")
+          }
+          if (f_x3 != 0.0) {
+            std::runtime_error("f_x3 should be zero")
+          }
+
+        }
+        // if(omegarot!=0.0) {
+        //   Real omegar=omegarot*cosx2;
+        //   Real omegat=-omegarot*sinx2;
+        //   /* centrifugal force */
+        //   Real f_xca = -1.0* (grav_pot_car_cen(xcar+drs, ycar, zcar)
+        //     -grav_pot_car_cen(xcar-drs, ycar, zcar))/(2.0*drs);
+        //   Real f_yca = -1.0* (grav_pot_car_cen(xcar, ycar+drs, zcar)
+        //     -grav_pot_car_cen(xcar, ycar-drs, zcar))/(2.0*drs);
+        //   Real f_zca = -1.0* (grav_pot_car_cen(xcar, ycar, zcar+drs)
+        //     -grav_pot_car_cen(xcar, ycar, zcar-drs))/(2.0*drs);
+        //   f_x1 += f_xca*sinx2*cosx3+f_yca*sinx2*sinx3+f_zca*cosx2;
+        //   f_x2 += f_xca*cosx2*cosx3+f_yca*cosx2*sinx3-f_zca*sinx2;
+        //   f_x3 += f_xca*(-sinx3) + f_yca*cosx3;
+        //   /* Coriolis force */
+        //   f_x1 -= 2.0*omegat*prim(IM3,k,j,i);
+        //   f_x2 += 2.0*omegar*prim(IM3,k,j,i);
+        //   f_x3 -= 2.0*omegar*prim(IM2,k,j,i)-2.0*omegat*prim(IM1,k,j,i);
+        // }
         src[IM1] = dt*prim(IDN,k,j,i)*f_x1;
         src[IM2] = dt*prim(IDN,k,j,i)*f_x2;
         src[IM3] = dt*prim(IDN,k,j,i)*f_x3;
