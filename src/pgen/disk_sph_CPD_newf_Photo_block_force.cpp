@@ -1445,13 +1445,13 @@ void PlanetarySourceTerms(
 
         if(mp==0.0) {
           if (f_x1 != 0.0) {
-            std::runtime_error("f_x1 should be zero")
+            std::runtime_error("f_x1 should be zero");
           }
           if (f_x2 != 0.0) {
-            std::runtime_error("f_x2 should be zero")
+            std::runtime_error("f_x2 should be zero");
           }
           if (f_x3 != 0.0) {
-            std::runtime_error("f_x3 should be zero")
+            std::runtime_error("f_x3 should be zero");
           }
 
         }
