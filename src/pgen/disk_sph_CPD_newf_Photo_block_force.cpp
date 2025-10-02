@@ -148,11 +148,11 @@ Vec3D get_ascending_node(double angle) {
   );
 }
 
-Vec3D cross(Vec3D v1, Vec3D v2) {
+Vec3D cross(Vec3D u, Vec3D v) {
   return Vec3D(
-    v1.y*v2.z - v1.z*v2.y,
-    v1.z*v2.x - v2.z*v1.z,
-    v1.x*v2.y - v2.x*v1.y
+    u.y*v.z - u.z*v.y,
+    u.z*v.x - u.x*v.z,
+    u.x*v.y - u.y*v.x
   );
 }
 
